@@ -1,0 +1,88 @@
+# =========================
+# STM32CubeMX / CubeIDE
+# =========================
+
+# Build folders
+Debug/
+Release/
+build/
+
+# CubeIDE metadata
+.settings/
+.project
+.cproject
+.mxproject
+
+# Generated binaries
+*.elf
+*.map
+*.hex
+*.bin
+
+# Object files
+*.o
+*.a
+*.d
+*.su
+
+# Linker output
+*.lst
+
+# =========================
+# CubeMX generated temp
+# =========================
+
+# CubeMX backup files
+*.ioc.bak
+
+# HAL / LL auto-generated (optional)
+# (keep these tracked if you modify them manually)
+# Drivers/
+
+# =========================
+# IDE / OS noise
+# =========================
+
+# VS Code
+.vscode/
+
+# Eclipse
+.metadata/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+# Linux
+*~
+
+# =========================
+# Python (host side scripts)
+# =========================
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+
+# =========================
+# Logs / captures
+# =========================
+
+*.log
+*.csv
+*.dat
+
+# =========================
+# Optional: generated plots
+# =========================
+
+*.png
+*.jpg
+*.svg
