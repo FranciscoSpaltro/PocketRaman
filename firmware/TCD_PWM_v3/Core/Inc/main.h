@@ -71,8 +71,6 @@ void Error_Handler(void);
 #define FMC_NBL1_GPIO_Port GPIOE
 #define FMC_NBL0_Pin GPIO_PIN_0
 #define FMC_NBL0_GPIO_Port GPIOE
-#define I2S3_CK_Pin GPIO_PIN_3
-#define I2S3_CK_GPIO_Port GPIOB
 #define uSD_CLK_Pin GPIO_PIN_12
 #define uSD_CLK_GPIO_Port GPIOC
 #define SWCLK_Pin GPIO_PIN_14
