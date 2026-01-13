@@ -32,7 +32,7 @@
 #define ICG_PIN GPIO_PIN_2
 #define SH_EDGES_MAX 200
 #define ICG_EDGES 2
-#define START_OFFSET 200
+#define START_OFFSET 22
 
 /* USER CODE END PD */
 
@@ -43,6 +43,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 DMA_HandleTypeDef hdma_tim2_up_ch3;
 DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
@@ -57,19 +58,12 @@ volatile int n = initial_n;
 volatile int real_SH_EDGES = 0;
 
 const uint32_t TS0_tics = 50;
-const uint32_t TS1_tics = 100;
+uint32_t TS1_tics = 122;
 const uint32_t TS2_tics = 500;
 uint32_t TS3_tics = 0;	// valores por default para 1 ms
 uint32_t TS4_tics = 0;
 uint32_t TS5_tics = 0;
 uint32_t TS6_tics = 0;
-
-
-static const uint32_t icg_dt[2] = {
-	0,
-	TS0_tics + TS1_tics + TS2_tics/*,
-	TS3_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS6_tics*/
-};
 
 
 static uint32_t sh_ccr[SH_EDGES_MAX];
@@ -83,6 +77,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART6_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -91,21 +86,55 @@ static void MX_TIM2_Init(void);
 /* USER CODE BEGIN 0 */
 
 static void calculate_times(uint32_t t_int_ms){
-	if(t_int_ms < 1){	// in fact: t_INT(min) = 10 us
-		TS3_tics = 89400;	// valores por default para 1 ms
-		TS4_tics = 100;
-		TS5_tics = 89900;
-		TS6_tics = 89850;
-		n = 6;
-	} else {
-		uint32_t t_int_tics = t_int_ms * 90000;					// REFACTOR: quitar dependencia clock
-		TS3_tics = t_int_tics - 600;
-		TS4_tics = 100;
-		TS5_tics = t_int_tics - 100;
-		TS6_tics = TS5_tics - 50;
+	uint32_t fM_period = 44 + 1; // 45 ticks
 
-		// reemplazo los 7.4 ms * 90 MHz por 74 * 9000 para no usar librerias de punto flotante
-		n = (74 * 9000 - TS0_tics - TS1_tics - TS2_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
+	uint32_t t_int_tics = t_int_ms * 90000;					// REFACTOR: quitar dependencia clock
+	TS3_tics = t_int_tics - 600;
+	TS4_tics = 100;
+	TS5_tics = t_int_tics - 100;
+	TS6_tics = TS5_tics - 50;
+
+	// reemplazo los 7.4 ms * 90 MHz por 74 * 9000 para no usar librerias de punto flotante
+	n = (74 * 9000 - TS0_tics - TS1_tics - TS2_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
+
+	// Reset de TS1 a un valor base seguro
+	uint32_t TS1_base = 100;
+
+	// Cálculo de 'n' (Pulsos de limpieza)
+	uint32_t overhead = TS0_tics + TS1_base + TS2_tics + TS3_tics + TS4_tics + TS6_tics;
+	uint32_t readout_time = 74 * 9000;
+
+	if (readout_time + t_int_tics > overhead) {
+		 n = (readout_time + t_int_tics - overhead - 1) / t_int_tics;
+	} else {
+		 n = 0;
+	}
+
+	// --- ALGORITMO DE PADDING AUTOMÁTICO (Phase Lock) ---
+	// 1. Calculamos cuánto dura el frame completo con el TS1 base
+	real_SH_EDGES = 4 + 2 * n; // Necesitamos saber cuántos pulsos hay realmente
+
+	// Calculamos la duración total sumando las partes fijas y las variables
+	// Nota: Es más seguro sumar sobre la estructura lógica que iterar el array aquí
+	uint32_t total_duration_tics = TS0_tics + TS1_base + (TS2_tics + TS3_tics)
+							  + n * (TS4_tics + TS5_tics) // Parte variable
+							  + TS4_tics + TS6_tics;      // Parte final
+
+	uint32_t total_physical_tics = START_OFFSET + total_duration_tics + 1;
+
+	// 2. Vemos cuánto sobra respecto al ciclo de fM
+	uint32_t remainder = total_physical_tics % fM_period;
+
+	// 3. Ajustamos TS1 para absorber la diferencia
+	if (remainder != 0) {
+		uint32_t padding = fM_period - remainder;
+		// ACTUALIZAMOS LA VARIABLE GLOBAL TS1
+		// Usamos un cast feo para quitar el 'const' o simplemente quita el 'const' de la definición global
+		*(uint32_t*)&TS1_tics = TS1_base + padding;
+		//*(uint32_t*)&TS4_tics = TS1_base + padding;
+	} else {
+		*(uint32_t*)&TS1_tics = TS1_base;
+		//*(uint32_t*)&TS4_tics = TS1_base;
 	}
 }
 
@@ -140,6 +169,10 @@ static void build_SH_table(void)
 
 static void build_ICG_table(void)
 {
+	uint32_t icg_dt[ICG_EDGES];
+	icg_dt[0] = 0;
+	icg_dt[1] = TS0_tics + TS1_tics + TS2_tics;
+
     uint32_t t = START_OFFSET;
 
     for (uint32_t i = 0; i < ICG_EDGES; i++) {
@@ -181,6 +214,7 @@ int main(void)
   MX_DMA_Init();
   MX_USART6_UART_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -205,6 +239,7 @@ int main(void)
   __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC2);
   __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC3);
 
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   // 4) Arrancar DMA apuntando a CCR2
   HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
   HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
@@ -321,8 +356,8 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_ENABLE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
@@ -345,6 +380,72 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 44;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_TRIGGER;
+  sSlaveConfig.InputTrigger = TIM_TS_ITR1;
+  if (HAL_TIM_SlaveConfigSynchro(&htim3, &sSlaveConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 22;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
 
 }
 
@@ -694,14 +795,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA6 PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pin : DSI_TE_Pin */
   GPIO_InitStruct.Pin = DSI_TE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -724,14 +817,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LCD_BL_CTRL_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB14 */
   GPIO_InitStruct.Pin = GPIO_PIN_14;
