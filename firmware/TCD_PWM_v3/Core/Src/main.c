@@ -26,13 +26,14 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-#define CCDBufferSize 3694
+#define CCD_PIXELS 3694
 #define SH_PIN GPIO_PIN_1
 #define ICG_PIN GPIO_PIN_2
 #define SH_EDGES_MAX 200
 #define ICG_EDGES 2
-#define START_OFFSET 22
+#define START_OFFSET 44
+
+#define HEADER_SIZE 4
 
 /* USER CODE END PD */
 
@@ -42,12 +43,16 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
+
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 DMA_HandleTypeDef hdma_tim2_up_ch3;
 DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
+DMA_HandleTypeDef hdma_usart6_tx;
 
 /* USER CODE BEGIN PV */
 
@@ -57,6 +62,9 @@ volatile int state = 0;
 volatile int n = initial_n;
 volatile int real_SH_EDGES = 0;
 
+volatile uint8_t sistema_listo_para_capturar = 1;
+volatile uint8_t icg_is_high = 0;
+
 const uint32_t TS0_tics = 50;
 uint32_t TS1_tics = 122;
 const uint32_t TS2_tics = 500;
@@ -65,9 +73,16 @@ uint32_t TS4_tics = 0;
 uint32_t TS5_tics = 0;
 uint32_t TS6_tics = 0;
 
-
 static uint32_t sh_ccr[SH_EDGES_MAX];
 static uint32_t icg_ccr[ICG_EDGES];
+
+uint16_t adc_buffer[HEADER_SIZE + 4*CCD_PIXELS];
+
+
+const uint16_t SYNC_WORD_1 = 0x4652;
+const uint16_t SYNC_WORD_2 = 0x414E;
+const uint16_t SYNC_WORD_3 = 0xFFFF;
+const uint16_t SYNC_WORD_4 = 0xFFFF;
 
 /* USER CODE END PV */
 
@@ -78,6 +93,7 @@ static void MX_DMA_Init(void);
 static void MX_USART6_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -85,10 +101,16 @@ static void MX_TIM3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-static void calculate_times(uint32_t t_int_ms){
+static void calculate_times(uint32_t t_int_us){
 	uint32_t fM_period = 44 + 1; // 45 ticks
 
-	uint32_t t_int_tics = t_int_ms * 90000;					// REFACTOR: quitar dependencia clock
+	uint32_t t_int_tics = 0;
+
+	if(t_int_us < 100)
+		t_int_tics = 100 * 90;
+	else
+		t_int_tics = t_int_us * 90;					// REFACTOR: quitar dependencia clock
+
 	TS3_tics = t_int_tics - 600;
 	TS4_tics = 100;
 	TS5_tics = t_int_tics - 100;
@@ -110,31 +132,26 @@ static void calculate_times(uint32_t t_int_ms){
 		 n = 0;
 	}
 
-	// --- ALGORITMO DE PADDING AUTOMÁTICO (Phase Lock) ---
-	// 1. Calculamos cuánto dura el frame completo con el TS1 base
+	// --- PADDING AUTOMÁTICO (Phase Lock) ---
+	// 1. Duracion del frame completo con el TS1 base
 	real_SH_EDGES = 4 + 2 * n; // Necesitamos saber cuántos pulsos hay realmente
 
-	// Calculamos la duración total sumando las partes fijas y las variables
-	// Nota: Es más seguro sumar sobre la estructura lógica que iterar el array aquí
+	// Duración total sumando las partes fijas y las variables
 	uint32_t total_duration_tics = TS0_tics + TS1_base + (TS2_tics + TS3_tics)
 							  + n * (TS4_tics + TS5_tics) // Parte variable
 							  + TS4_tics + TS6_tics;      // Parte final
 
 	uint32_t total_physical_tics = START_OFFSET + total_duration_tics + 1;
 
-	// 2. Vemos cuánto sobra respecto al ciclo de fM
+	// 2. Cuánto sobra respecto al ciclo de fM
 	uint32_t remainder = total_physical_tics % fM_period;
 
-	// 3. Ajustamos TS1 para absorber la diferencia
+	// 3. Ajuste de TS1 para absorber la diferencia
 	if (remainder != 0) {
 		uint32_t padding = fM_period - remainder;
-		// ACTUALIZAMOS LA VARIABLE GLOBAL TS1
-		// Usamos un cast feo para quitar el 'const' o simplemente quita el 'const' de la definición global
-		*(uint32_t*)&TS1_tics = TS1_base + padding;
-		//*(uint32_t*)&TS4_tics = TS1_base + padding;
+		TS1_tics = TS1_base + padding;
 	} else {
-		*(uint32_t*)&TS1_tics = TS1_base;
-		//*(uint32_t*)&TS4_tics = TS1_base;
+		TS1_tics = TS1_base;
 	}
 }
 
@@ -215,16 +232,26 @@ int main(void)
   MX_USART6_UART_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
 
   // SH: A1 (canal 2 osciloscopio)
   // ICG: A2 (canal 1 osciloscopio)
 
-  calculate_times(1);
+  calculate_times(100);
 
   build_SH_table();
   build_ICG_table();
+
+  adc_buffer[0] = SYNC_WORD_1;
+  adc_buffer[1] = SYNC_WORD_2;
+  adc_buffer[2] = SYNC_WORD_3;
+  adc_buffer[3] = SYNC_WORD_4;
+
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS * 4);
+
+
   __HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
 
   __HAL_TIM_SET_COUNTER(&htim2, 0);
@@ -243,8 +270,10 @@ int main(void)
   // 4) Arrancar DMA apuntando a CCR2
   HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
   HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
-  HAL_TIM_Base_Start(&htim2);
 
+  __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_CC3);
+
+  HAL_TIM_Base_Start(&htim2);
 
   /* USER CODE END 2 */
 
@@ -316,6 +345,58 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T3_CC1;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_4;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
 }
 
 /**
@@ -490,6 +571,7 @@ static void MX_DMA_Init(void)
 
   /* DMA controller clock enable */
   __HAL_RCC_DMA1_CLK_ENABLE();
+  __HAL_RCC_DMA2_CLK_ENABLE();
 
   /* DMA interrupt init */
   /* DMA1_Stream1_IRQn interrupt configuration */
@@ -498,6 +580,12 @@ static void MX_DMA_Init(void)
   /* DMA1_Stream6_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA2_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 
 }
 
@@ -782,12 +870,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(LCD_INT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pin : PH7 */
   GPIO_InitStruct.Pin = GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -833,9 +915,39 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+    // Verificamos que sea el ADC1 (por buenas prácticas)
+    if (hadc->Instance == ADC1)
+    {
+    	HAL_ADC_Stop_DMA(&hadc1);
+    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)adc_buffer, sizeof(adc_buffer));
+    }
+}
 
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(huart->Instance == USART6){
+		sistema_listo_para_capturar = 1;
+	}
+}
 
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim->Instance == TIM2 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3 && sistema_listo_para_capturar == 1){
 
+		icg_is_high ^= 1;
+
+		if(icg_is_high == 1){
+
+		sistema_listo_para_capturar = 0; // Bajamos la bandera
+
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS * 4);
+
+		}
+
+    }
+}
 /* USER CODE END 4 */
 
 /**
