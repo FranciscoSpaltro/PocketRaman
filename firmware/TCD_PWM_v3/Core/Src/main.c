@@ -28,8 +28,11 @@
 /* USER CODE BEGIN PD */
 
 #define CCDBufferSize 3694
-#define SH_PIN GPIO_PIN_2
-#define ICG_PIN GPIO_PIN_7
+#define SH_PIN GPIO_PIN_1
+#define ICG_PIN GPIO_PIN_2
+#define SH_EDGES_MAX 200
+#define ICG_EDGES 2
+#define START_OFFSET 200
 
 /* USER CODE END PD */
 
@@ -40,6 +43,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
+DMA_HandleTypeDef hdma_tim2_up_ch3;
+DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
 
@@ -49,20 +54,33 @@ const int initial_n = 6;
 
 volatile int state = 0;
 volatile int n = initial_n;
+volatile int real_SH_EDGES = 0;
 
 const uint32_t TS0_tics = 50;
 const uint32_t TS1_tics = 100;
 const uint32_t TS2_tics = 500;
-const uint32_t TS3_tics = 89400;
-const uint32_t TS4_tics = 100;
-const uint32_t TS5_tics = 89900;
-const uint32_t TS6_tics = 89890;
+uint32_t TS3_tics = 0;	// valores por default para 1 ms
+uint32_t TS4_tics = 0;
+uint32_t TS5_tics = 0;
+uint32_t TS6_tics = 0;
+
+
+static const uint32_t icg_dt[2] = {
+	0,
+	TS0_tics + TS1_tics + TS2_tics/*,
+	TS3_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS5_tics + TS4_tics + TS6_tics*/
+};
+
+
+static uint32_t sh_ccr[SH_EDGES_MAX];
+static uint32_t icg_ccr[ICG_EDGES];
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART6_UART_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
@@ -72,6 +90,63 @@ static void MX_TIM2_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+static void calculate_times(uint32_t t_int_ms){
+	if(t_int_ms < 1){	// in fact: t_INT(min) = 10 us
+		TS3_tics = 89400;	// valores por default para 1 ms
+		TS4_tics = 100;
+		TS5_tics = 89900;
+		TS6_tics = 89850;
+		n = 6;
+	} else {
+		uint32_t t_int_tics = t_int_ms * 90000;					// REFACTOR: quitar dependencia clock
+		TS3_tics = t_int_tics - 600;
+		TS4_tics = 100;
+		TS5_tics = t_int_tics - 100;
+		TS6_tics = TS5_tics - 50;
+
+		// reemplazo los 7.4 ms * 90 MHz por 74 * 9000 para no usar librerias de punto flotante
+		n = (74 * 9000 - TS0_tics - TS1_tics - TS2_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
+	}
+}
+
+static void build_SH_table(void)
+{
+
+	uint32_t sh_dt[SH_EDGES_MAX];
+
+	sh_dt[0] = TS0_tics;
+	sh_dt[1] = TS1_tics;
+	sh_dt[2] = TS2_tics + TS3_tics;
+
+	for(int i = 0; i < n; i++){
+		sh_dt[3 + 2 * i] = TS4_tics;
+		sh_dt[3 + 2 * i + 1] = TS5_tics;
+	}
+
+	sh_dt[2 + 2 * n + 1] = TS4_tics;
+
+
+	real_SH_EDGES = 4 + 2 * n;
+
+
+    uint32_t t = START_OFFSET;
+
+    for (uint32_t i = 0; i < real_SH_EDGES; i++) {
+        t += sh_dt[i];
+        sh_ccr[i] = t;
+    }
+
+}
+
+static void build_ICG_table(void)
+{
+    uint32_t t = START_OFFSET;
+
+    for (uint32_t i = 0; i < ICG_EDGES; i++) {
+        t += icg_dt[i];
+        icg_ccr[i] = t;
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -103,16 +178,37 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART6_UART_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
 
-  GPIOA->BSRR = SH_PIN << 16;
-  GPIOA->BSRR = ICG_PIN;
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);   // fM (independiente)
-  TIM2->CCR1 = TIM2->CNT + 10;
-  HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_1);
+  // SH: A1 (canal 2 osciloscopio)
+  // ICG: A2 (canal 1 osciloscopio)
+
+  calculate_times(1);
+
+  build_SH_table();
+  build_ICG_table();
+  __HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
+
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
+
+    // El primer flanco de ICG ocurrirá en START_OFFSET
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, icg_ccr[0]);
+
+    // El primer flanco de SH ocurrirá en START_OFFSET + TS0
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, sh_ccr[0]);
+
+  __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_UPDATE);
+  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC2);
+  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC3);
+
+  // 4) Arrancar DMA apuntando a CCR2
+  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
+  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
+  HAL_TIM_Base_Start(&htim2);
 
 
   /* USER CODE END 2 */
@@ -209,7 +305,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 44;
+  htim2.Init.Period = 720200;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -225,28 +321,23 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+  sConfigOC.Pulse = 50;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 22;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -287,6 +378,25 @@ static void MX_USART6_UART_Init(void)
   /* USER CODE BEGIN USART6_Init 2 */
 
   /* USER CODE END USART6_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+  /* DMA1_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
 
 }
 
@@ -334,7 +444,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOH, GPIO_PIN_7, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|LCD_BL_CTRL_Pin|GPIO_PIN_7, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LCD_BL_CTRL_GPIO_Port, LCD_BL_CTRL_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : SAI1_FSA_Pin SAI1_SCKA_Pin */
   GPIO_InitStruct.Pin = SAI1_FSA_Pin|SAI1_SCKA_Pin;
@@ -584,11 +694,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA2 LCD_BL_CTRL_Pin PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2|LCD_BL_CTRL_Pin|GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pins : PA6 PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : DSI_TE_Pin */
@@ -607,6 +718,21 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : LCD_BL_CTRL_Pin */
+  GPIO_InitStruct.Pin = LCD_BL_CTRL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LCD_BL_CTRL_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /*Configure GPIO pin : PB14 */
   GPIO_InitStruct.Pin = GPIO_PIN_14;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -621,67 +747,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
-{
-    if (htim->Instance == TIM2 && htim->Channel  == HAL_TIM_ACTIVE_CHANNEL_1) {
-    	switch(state){
-    		case 0:
-    			GPIOA->BSRR = ICG_PIN << 16;
-    			TIM2->CCR1 += TS0_tics;
-    			state = 1;
-    			break;
 
-    		case 1:
-    			GPIOA->BSRR = SH_PIN;
-    			TIM2->CCR1 += TS1_tics;
-    			state = 2;
-    			break;
-
-    		case 2:
-    			GPIOA->BSRR = SH_PIN << 16;
-    			TIM2->CCR1 += TS2_tics;
-    			state = 3;
-    			break;
-
-    		case 3:
-    			GPIOA->BSRR = ICG_PIN;
-    			TIM2->CCR1 += TS3_tics;
-    			state = 4;
-    			break;
-
-    		case 4:
-    			GPIOA->BSRR = SH_PIN;
-    			TIM2->CCR1 += TS4_tics;
-    			if(n>0)
-    				state = 5;
-    			else
-    				state = 6;
-    			break;
-
-    		case 5:
-    			GPIOA->BSRR = SH_PIN << 16;
-    			TIM2->CCR1 += TS5_tics;
-    			n--;
-    			state = 4;
-    			break;
-
-    		case 6:
-    			GPIOA->BSRR = SH_PIN << 16;
-    			TIM2->CCR1 += TS6_tics;
-    			n = initial_n;
-    			state = 0;
-    			break;
-
-    		default:
-    			GPIOA->BSRR = SH_PIN << 16;
-    			GPIOA->BSRR = ICG_PIN;
-    			state = 0;
-    			n = initial_n;
-    			TIM2->CCR1 += 10;
-    			break;
-    	}
-    }
-}
 
 
 
