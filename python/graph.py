@@ -39,6 +39,8 @@ ax.set_xlabel("Número de Pixel")
 ax.set_title(f"Señal CCD en Tiempo Real ({CCD_PIXELS} pixeles)")
 ax.grid(True)
 
+contador = 0
+
 plt.tight_layout()
 
 def sync_to_header(serial_port):
@@ -64,6 +66,13 @@ try:
         # 1. Sincronizar con el encabezado
         sync_to_header(ser)
         
+        contador += 1
+        if contador < 4:
+            # Ignorar los primeros 3 frames para estabilizar
+            ser.read(PAYLOAD_BYTES)
+            continue
+
+        contador = 0
         # 2. Leer el bloque de datos exacto
         raw_data = ser.read(PAYLOAD_BYTES)
 

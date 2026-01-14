@@ -76,7 +76,7 @@ uint32_t TS6_tics = 0;
 static uint32_t sh_ccr[SH_EDGES_MAX];
 static uint32_t icg_ccr[ICG_EDGES];
 
-uint16_t adc_buffer[HEADER_SIZE + 4*CCD_PIXELS];
+uint16_t adc_buffer[HEADER_SIZE + CCD_PIXELS];
 
 
 const uint16_t SYNC_WORD_1 = 0x4652;
@@ -249,7 +249,7 @@ int main(void)
   adc_buffer[2] = SYNC_WORD_3;
   adc_buffer[3] = SYNC_WORD_4;
 
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS * 4);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
 
 
   __HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
@@ -942,7 +942,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 
 		sistema_listo_para_capturar = 0; // Bajamos la bandera
 
-		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS * 4);
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
 
 		}
 
