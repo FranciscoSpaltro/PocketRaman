@@ -7,7 +7,7 @@ import struct
 PORT = "COM7"       # Ajustá tu puerto
 BAUD = 460800
 CCD_PIXELS = 3694
-OVERSAMPLING = 4    # 4 muestras por cada pixel físico
+OVERSAMPLING = 1    # CAMBIO: Ahora es 1 muestra por pixel (Timer chaining)
 
 # Total de datos que llegan
 TOTAL_POINTS = CCD_PIXELS * OVERSAMPLING 
@@ -25,26 +25,19 @@ except Exception as e:
 
 plt.ion()
 
-# Creamos 4 gráficos apilados verticalmente
-# sharex=True hace que si haces zoom en uno, se haga zoom en todos (ideal para comparar)
-fig, (ax0, ax1, ax2, ax3) = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
+# --- CAMBIO: Un solo gráfico ---
+fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
-# Inicializamos las 4 líneas
-# Cada una tendrá CCD_PIXELS de largo (3694 puntos)
-zeros = np.zeros(CCD_PIXELS)
-line0, = ax0.plot(zeros, color='blue')
-line1, = ax1.plot(zeros, color='orange')
-line2, = ax2.plot(zeros, color='green')
-line3, = ax3.plot(zeros, color='red')
+# Inicializamos la línea
+zeros = np.zeros(TOTAL_POINTS)
+line, = ax.plot(zeros, color='blue')
 
-# Configuramos ejes
-for ax, i in zip([ax0, ax1, ax2, ax3], range(4)):
-    ax.set_ylim(0, 4200)
-    ax.set_ylabel(f"Muestra {i}")
-    ax.grid(True)
-
-ax0.set_title(f"Desglose de las 4 muestras por Pixel (Total: {CCD_PIXELS} pixeles)")
-ax3.set_xlabel("Número de Pixel")
+# Configuración del eje
+ax.set_ylim(0, 4200) # Ajusta según tu ADC (0 a 4095)
+ax.set_ylabel("Amplitud (ADC)")
+ax.set_xlabel("Número de Pixel")
+ax.set_title(f"Señal CCD en Tiempo Real ({CCD_PIXELS} pixeles)")
+ax.grid(True)
 
 plt.tight_layout()
 
@@ -65,12 +58,13 @@ def sync_to_header(serial_port):
 
 # --- BUCLE PRINCIPAL ---
 try:
-    print("Esperando sincronización...")
+    print(f"Esperando datos ({PAYLOAD_BYTES} bytes por frame)...")
+    
     while True:
-        # 1. Sincronizar
+        # 1. Sincronizar con el encabezado
         sync_to_header(ser)
         
-        # 2. Leer todo el bloque de 14776 muestras
+        # 2. Leer el bloque de datos exacto
         raw_data = ser.read(PAYLOAD_BYTES)
 
         if len(raw_data) != PAYLOAD_BYTES:
@@ -78,23 +72,13 @@ try:
             continue
 
         # 3. Convertir a uint16
-        # array completo: [M0, M1, M2, M3, M0, M1, M2, M3...]
+        # Como OVERSAMPLING = 1, full_data ya es tu array de pixeles final
         full_data = np.frombuffer(raw_data, dtype=np.dtype('<u2'))
 
-        # 4. DESENTRELAZADO (La magia de Numpy)
-        # Slicing: array[inicio : final : paso]
+        # 4. Actualizar gráfico
+        line.set_ydata(full_data)
         
-        sample_0 = full_data[0::4] # Empieza en 0, salta de a 4: [0, 4, 8...]
-        sample_1 = full_data[1::4] # Empieza en 1, salta de a 4: [1, 5, 9...]
-        sample_2 = full_data[2::4] # Empieza en 2, salta de a 4: [2, 6, 10...]
-        sample_3 = full_data[3::4] # Empieza en 3, salta de a 4: [3, 7, 11...]
-
-        # 5. Actualizar los 4 gráficos
-        line0.set_ydata(sample_0)
-        line1.set_ydata(sample_1)
-        line2.set_ydata(sample_2)
-        line3.set_ydata(sample_3)
-        
+        # Refrescar ventana
         fig.canvas.draw()
         fig.canvas.flush_events()
 
