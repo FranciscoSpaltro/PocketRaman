@@ -6,7 +6,10 @@
   ******************************************************************************
   * @attention
   *
-  * Implementacion comunicacion UART
+  * Para modificar el tiempo de integración, el programa espera recibir el comando 0x41 0x4E que ejecuta el reinicio
+  *
+  * Al iniciarse, la STM envia el comando 0x46 0x51
+  * Espera recibir 0x41 0x4E + uint32_t con el tiempo nuevo en us
   *
   ******************************************************************************
   */
@@ -17,6 +20,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "functions.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -26,14 +30,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define CCD_PIXELS 3694
-#define SH_PIN GPIO_PIN_1
-#define ICG_PIN GPIO_PIN_2
-#define SH_EDGES_MAX 200
-#define ICG_EDGES 2
-#define START_OFFSET 44
 
-#define HEADER_SIZE 4
 
 /* USER CODE END PD */
 
@@ -53,36 +50,19 @@ DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_tx;
+DMA_HandleTypeDef hdma_usart6_rx;
 
 /* USER CODE BEGIN PV */
 
-const int initial_n = 6;
+extern uint16_t adc_buffer[HEADER_SIZE + CCD_PIXELS];
+extern uint32_t sh_ccr[SH_EDGES_MAX];
+extern uint32_t icg_ccr[ICG_EDGES];
+extern volatile int real_SH_EDGES;
+extern volatile uint8_t sistema_listo_para_capturar;
+extern uint32_t TS6_tics;
+extern volatile uint8_t icg_is_high;
 
-volatile int state = 0;
-volatile int n = initial_n;
-volatile int real_SH_EDGES = 0;
-
-volatile uint8_t sistema_listo_para_capturar = 1;
-volatile uint8_t icg_is_high = 0;
-
-const uint32_t TS0_tics = 50;
-uint32_t TS1_tics = 122;
-const uint32_t TS2_tics = 500;
-uint32_t TS3_tics = 0;	// valores por default para 1 ms
-uint32_t TS4_tics = 0;
-uint32_t TS5_tics = 0;
-uint32_t TS6_tics = 0;
-
-static uint32_t sh_ccr[SH_EDGES_MAX];
-static uint32_t icg_ccr[ICG_EDGES];
-
-uint16_t adc_buffer[HEADER_SIZE + CCD_PIXELS];
-
-
-const uint16_t SYNC_WORD_1 = 0x4652;
-const uint16_t SYNC_WORD_2 = 0x414E;
-const uint16_t SYNC_WORD_3 = 0xFFFF;
-const uint16_t SYNC_WORD_4 = 0xFFFF;
+uint8_t rx_cmd_buffer[2];
 
 /* USER CODE END PV */
 
@@ -101,102 +81,7 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-static void calculate_times(uint32_t t_int_us){
-	uint32_t fM_period = 44 + 1; // 45 ticks
 
-	uint32_t t_int_tics = 0;
-
-	if(t_int_us < 100)
-		t_int_tics = 100 * 90;
-	else
-		t_int_tics = t_int_us * 90;					// REFACTOR: quitar dependencia clock
-
-	TS3_tics = t_int_tics - 600;
-	TS4_tics = 100;
-	TS5_tics = t_int_tics - 100;
-	TS6_tics = TS5_tics - 50;
-
-	// reemplazo los 7.4 ms * 90 MHz por 74 * 9000 para no usar librerias de punto flotante
-	n = (74 * 9000 - TS0_tics - TS1_tics - TS2_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
-
-	// Reset de TS1 a un valor base seguro
-	uint32_t TS1_base = 100;
-
-	// Cálculo de 'n' (Pulsos de limpieza)
-	uint32_t overhead = TS0_tics + TS1_base + TS2_tics + TS3_tics + TS4_tics + TS6_tics;
-	uint32_t readout_time = 74 * 9000;
-
-	if (readout_time + t_int_tics > overhead) {
-		 n = (readout_time + t_int_tics - overhead - 1) / t_int_tics;
-	} else {
-		 n = 0;
-	}
-
-	// --- PADDING AUTOMÁTICO (Phase Lock) ---
-	// 1. Duracion del frame completo con el TS1 base
-	real_SH_EDGES = 4 + 2 * n; // Necesitamos saber cuántos pulsos hay realmente
-
-	// Duración total sumando las partes fijas y las variables
-	uint32_t total_duration_tics = TS0_tics + TS1_base + (TS2_tics + TS3_tics)
-							  + n * (TS4_tics + TS5_tics) // Parte variable
-							  + TS4_tics + TS6_tics;      // Parte final
-
-	uint32_t total_physical_tics = START_OFFSET + total_duration_tics + 1;
-
-	// 2. Cuánto sobra respecto al ciclo de fM
-	uint32_t remainder = total_physical_tics % fM_period;
-
-	// 3. Ajuste de TS1 para absorber la diferencia
-	if (remainder != 0) {
-		uint32_t padding = fM_period - remainder;
-		TS1_tics = TS1_base + padding;
-	} else {
-		TS1_tics = TS1_base;
-	}
-}
-
-static void build_SH_table(void)
-{
-
-	uint32_t sh_dt[SH_EDGES_MAX];
-
-	sh_dt[0] = TS0_tics;
-	sh_dt[1] = TS1_tics;
-	sh_dt[2] = TS2_tics + TS3_tics;
-
-	for(int i = 0; i < n; i++){
-		sh_dt[3 + 2 * i] = TS4_tics;
-		sh_dt[3 + 2 * i + 1] = TS5_tics;
-	}
-
-	sh_dt[2 + 2 * n + 1] = TS4_tics;
-
-
-	real_SH_EDGES = 4 + 2 * n;
-
-
-    uint32_t t = START_OFFSET;
-
-    for (uint32_t i = 0; i < real_SH_EDGES; i++) {
-        t += sh_dt[i];
-        sh_ccr[i] = t;
-    }
-
-}
-
-static void build_ICG_table(void)
-{
-	uint32_t icg_dt[ICG_EDGES];
-	icg_dt[0] = 0;
-	icg_dt[1] = TS0_tics + TS1_tics + TS2_tics;
-
-    uint32_t t = START_OFFSET;
-
-    for (uint32_t i = 0; i < ICG_EDGES; i++) {
-        t += icg_dt[i];
-        icg_ccr[i] = t;
-    }
-}
 /* USER CODE END 0 */
 
 /**
@@ -235,45 +120,22 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
-
+  uint32_t t_int_inicial = wait_new_int_time_uart();
   // SH: A1 (canal 2 osciloscopio)
   // ICG: A2 (canal 1 osciloscopio)
 
-  calculate_times(100);
+  calculate_times(t_int_inicial);
 
   build_SH_table();
   build_ICG_table();
-
-  adc_buffer[0] = SYNC_WORD_1;
-  adc_buffer[1] = SYNC_WORD_2;
-  adc_buffer[2] = SYNC_WORD_3;
-  adc_buffer[3] = SYNC_WORD_4;
+  build_header();
+  setup_timer_icg_sh();
 
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
-
-
-  __HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
-
-  __HAL_TIM_SET_COUNTER(&htim2, 0);
-
-    // El primer flanco de ICG ocurrirá en START_OFFSET
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, icg_ccr[0]);
-
-    // El primer flanco de SH ocurrirá en START_OFFSET + TS0
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, sh_ccr[0]);
-
-  __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_UPDATE);
-  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC2);
-  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC3);
-
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  // 4) Arrancar DMA apuntando a CCR2
-  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
-  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
-
-  __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_CC3);
-
   HAL_TIM_Base_Start(&htim2);
+
+  HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, 2);
 
   /* USER CODE END 2 */
 
@@ -281,8 +143,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-
 	  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
@@ -583,6 +443,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream0_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA2_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
   /* DMA2_Stream6_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
@@ -946,6 +809,24 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 
 		}
 
+    }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    // Verificamos que sea la UART correcta
+    if (huart->Instance == USART6)
+    {
+        // Verificamos si el comando es "FS"
+        // 0x46 = 'F', 0x52 = 'R'
+        if (rx_cmd_buffer[0] == 0x46 && rx_cmd_buffer[1] == 0x53)
+        {
+            // Opcional: Apagar periféricos para ser prolijos
+            HAL_ADC_Stop_DMA(&hadc1);
+            HAL_TIM_Base_Stop(&htim2);
+
+            NVIC_SystemReset();
+        }
     }
 }
 /* USER CODE END 4 */

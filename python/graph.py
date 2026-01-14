@@ -3,11 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import struct
 
-# --- CONFIGURACIÓN ---
-PORT = "COM7"       # Ajustá tu puerto
+PORT = "COM7"      
 BAUD = 460800
 CCD_PIXELS = 3694
-OVERSAMPLING = 1    # CAMBIO: Ahora es 1 muestra por pixel (Timer chaining)
+OVERSAMPLING = 1    # 1 muestra por pixel
+contador = 0
+N_FRAMES = 3       # 4
 
 # Total de datos que llegan
 TOTAL_POINTS = CCD_PIXELS * OVERSAMPLING 
@@ -25,21 +26,16 @@ except Exception as e:
 
 plt.ion()
 
-# --- CAMBIO: Un solo gráfico ---
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
-# Inicializamos la línea
 zeros = np.zeros(TOTAL_POINTS)
 line, = ax.plot(zeros, color='blue')
 
-# Configuración del eje
-ax.set_ylim(0, 4200) # Ajusta según tu ADC (0 a 4095)
+ax.set_ylim(0, 4200)
 ax.set_ylabel("Amplitud (ADC)")
 ax.set_xlabel("Número de Pixel")
 ax.set_title(f"Señal CCD en Tiempo Real ({CCD_PIXELS} pixeles)")
 ax.grid(True)
-
-contador = 0
 
 plt.tight_layout()
 
@@ -58,17 +54,15 @@ def sync_to_header(serial_port):
         if buffer == HEADER_BYTES:
             return
 
-# --- BUCLE PRINCIPAL ---
 try:
     print(f"Esperando datos ({PAYLOAD_BYTES} bytes por frame)...")
     
     while True:
-        # 1. Sincronizar con el encabezado
         sync_to_header(ser)
         
         contador += 1
-        if contador < 4:
-            # Ignorar los primeros 3 frames para estabilizar
+        if contador < N_FRAMES:
+            # Ignorar los primeros N_FRAMES frames para estabilizar
             ser.read(PAYLOAD_BYTES)
             continue
 
@@ -81,13 +75,11 @@ try:
             continue
 
         # 3. Convertir a uint16
-        # Como OVERSAMPLING = 1, full_data ya es tu array de pixeles final
+        # Como OVERSAMPLING = 1, full_data ya es EL array de pixeles final
         full_data = np.frombuffer(raw_data, dtype=np.dtype('<u2'))
 
-        # 4. Actualizar gráfico
         line.set_ydata(full_data)
         
-        # Refrescar ventana
         fig.canvas.draw()
         fig.canvas.flush_events()
 
