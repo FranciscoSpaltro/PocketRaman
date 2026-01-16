@@ -20,7 +20,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+//#include "TCD_signals.h"
+//#include "conf_processing.h"
 #include "functions.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -128,7 +131,7 @@ int main(void)
 
   build_SH_table();
   build_ICG_table();
-  build_header();
+
   setup_timer_icg_sh();
 
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
@@ -803,9 +806,9 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 
 		if(icg_is_high == 1){
 
-		sistema_listo_para_capturar = 0; // Bajamos la bandera
+			sistema_listo_para_capturar = 0;
 
-		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
+			HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
 
 		}
 

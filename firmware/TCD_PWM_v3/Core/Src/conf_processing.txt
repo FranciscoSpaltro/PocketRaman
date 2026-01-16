@@ -1,0 +1,82 @@
+#include "conf_processing.h"
+
+
+// ADC va de 0-4095 asique valores sobre 0x0FFF son headers adecuados; 16 bits para que se alinee facil con los mensajes DMA ADC
+const uint16_t header = 0x7346;
+extern UART_HandleTypeDef huart6;
+
+
+uint16_t checksum(uint16_t * vec, uint16_t N){
+	uint16_t res = 0x0000;
+
+	for(int i = 0; i < N; i++)
+		res ^= vec[i];
+
+	return res;
+}
+
+int is_tint_command_response(uint8_t * rx_buffer){
+	uint16_t * p_rx_buffer = (uint16_t *) rx_buffer;
+
+	if (p_rx_buffer[0] != header) return 0; // Compara la primera palabra (F S)
+
+	if(((p_rx_buffer[1] >> 8) & 0xFF) != COMMAND_ASK_FOR_INTEGRATION_TIME)	// COMMAND
+		return 0;
+
+	if((p_rx_buffer[1] & 0xFF) != CONF_MSG)
+		return 0;
+
+	if(p_rx_buffer[4] != checksum((uint16_t *) rx_buffer, 4))
+		return 0;
+
+	return 1;
+}
+
+uint32_t wait_new_int_time_uart(void) {
+	uint16_t request_msg[HEADER_SIZE + 4];
+    uint8_t rx_buffer[12]; // 4 bytes Header (2 uint16_t) + COMMAND + TYPE (2 bytes) + 4 bytes (uint32_t) + CS (2 bytes)
+    uint32_t t_int_recibido = 0;
+
+    request_msg[1] = COMMAND_ASK_FOR_INTEGRATION_TIME << 8 | CONF_MSG;
+    request_msg[2] = 0xFFFF;
+    request_msg[3] = 0xFFFF;
+    request_msg[4] = checksum((uint16_t *) request_msg, 5);
+
+    // Parpadeo rápido para indicar "Esperando PC..."
+    while (1) {
+        // 1. Enviar solicitud: "Estoy listo, dame el tiempo"
+        HAL_UART_Transmit(&huart6, (uint8_t*)request_msg, 10, 100);
+
+        // 2. Esperar respuesta durante 500ms
+        if (HAL_UART_Receive(&huart6, rx_buffer, 10, 500) == HAL_OK) {
+
+            // 3. Verificar Header ([MEJORA]: buscar header por si esta desplazado)
+        	if(!is_tint_command_response(rx_buffer))
+        		continue;
+
+            // 4. Decodificar uint32_t (Little Endian)
+            // Byte 2 es el menos significativo
+            t_int_recibido = 	(rx_buffer[7] << 24) |
+            					(rx_buffer[6] << 16) |
+                                (rx_buffer[5] << 8)  |
+                                 rx_buffer[4];
+
+			// Protección: Evitar tiempos absurdos (ej. 0)
+			if (t_int_recibido < 10) t_int_recibido = 10;
+			if (t_int_recibido > 7000) t_int_recibido = 7000;
+
+			request_msg[1] = COMMAND_ASK_FOR_INTEGRATION_TIME << 8 | CONF_MSG;
+			request_msg[2] = (uint16_t)(t_int_recibido & 0xFFFF);        // Parte Baja
+			request_msg[3] = (uint16_t)((t_int_recibido >> 16) & 0xFFFF); // Parte Alta
+			request_msg[4] = checksum((uint16_t *) request_msg, 4);
+
+			 HAL_UART_Transmit(&huart6, (uint8_t*)request_msg, 10, 100);
+
+			return t_int_recibido;
+        }
+
+        // Si falló o hubo timeout, parpadeamos LED y reintentamos
+        HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+        //HAL_Delay(100);
+    }
+}

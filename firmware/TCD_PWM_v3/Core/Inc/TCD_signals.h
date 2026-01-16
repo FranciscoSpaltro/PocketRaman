@@ -1,5 +1,5 @@
-#ifndef FUNCTIONS_H
-#define FUNCTIONS_H
+#ifndef TCD_SIGNALS_H
+#define TCD_SIGNALS_H
 
 #include <stdint.h>
 #include "main.h"
@@ -11,17 +11,9 @@
 #define ICG_EDGES 2
 #define START_OFFSET 44
 
-#define COMMAND_ASK_FOR_INTEGRATION_TIME 0x01
-#define CONF_MSG 0x00
-#define DATA_MSG 0x01
-#define HEADER 0x7346
-
-#define HEADER_SIZE 1	// en PALABRAS (2 bytes)
-
 void calculate_times(uint32_t t_int_us);
 void build_SH_table(void);
 void build_ICG_table(void);
 void setup_timer_icg_sh(void);
-uint32_t wait_new_int_time_uart(void);
 
 #endif

@@ -1,22 +1,24 @@
 import serial
 import numpy as np
 import matplotlib.pyplot as plt
+from enum import Enum
 import struct
+from dataclasses import dataclass
 
-# --- CONFIGURACIÓN ORIGINAL ---
+# --- CONFIGURACIÓN ---
 PORT = "COM7"      
 BAUD = 460800
-CCD_PIXELS = 3694
-OVERSAMPLING = 1   
-contador = 0
-N_FRAMES = 3 
+#HEADER_WORDS = [0x5246, 0x4E41]
+HEADER_WORDS = [0x7346]
+HEADER_BYTES = struct.pack('<1H', *HEADER_WORDS)
+COMMAND_ASK_FOR_INTEGRATION_TIME = 0x01
+CONF_MSG = 0x00
+DATA_MSG = 0x01
+INTEGRATION_TIME_US = 10000
 
-# Total de datos que llegan
-TOTAL_POINTS = CCD_PIXELS * OVERSAMPLING 
-PAYLOAD_BYTES = TOTAL_POINTS * 2 
-
-# Header (Little Endian)
-HEADER_BYTES = b'\x52\x46\x4E\x41\xFF\xFF\xFF\xFF'
+class Mensaje(Enum):
+    SET_INTEGRATION_TIME_REQUEST = 1
+    SET_INTEGRATION_TIME_RESPONSE = 2
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=2)
@@ -25,62 +27,7 @@ except Exception as e:
     print(f"Error abriendo puerto: {e}")
     exit()
 
-# --- CONFIGURACIÓN GRÁFICA (3 PANELES) ---
-plt.ion()
-# width_ratios controla el ancho relativo: [1, 6, 1] significa que el del medio es 6 veces más ancho
-fig, (ax_left, ax_main, ax_right) = plt.subplots(1, 3, figsize=(15, 6), gridspec_kw={'width_ratios': [1, 6, 1]})
-
-# --- 1. IZQUIERDA: CALIBRACIÓN (0-31) ---
-x_left = np.arange(0, 32)
-zeros_left = np.zeros(len(x_left))
-line_left, = ax_left.plot(x_left, zeros_left, 'b.-', markersize=3)
-
-ax_left.set_ylim(0, 4200)
-ax_left.set_title("Calibración (0-31)")
-ax_left.set_ylabel("Amplitud (ADC)")
-ax_left.grid(True)
-
-# Líneas y Etiquetas (Estáticas)
-ax_left.axvline(x=15, color='r', linestyle='--')
-ax_left.axvline(x=28, color='r', linestyle='--')
-ax_left.axvline(x=31, color='r', linestyle='--')
-
-ax_left.text(7.5, 3800, "Dummy\n(0-15)", color='r', ha='center', fontsize=7, rotation=90)
-ax_left.text(22, 3800, "Shielded\n(16-28)", color='r', ha='center', fontsize=7, rotation=90)
-ax_left.text(30, 3500, "-", color='r', ha='center', fontsize=8)
-
-
-# --- 2. CENTRO: EFECTIVOS (32-3679) ---
-x_main = np.arange(32, 3680)
-zeros_main = np.zeros(len(x_main))
-line_main, = ax_main.plot(x_main, zeros_main, 'b')
-
-ax_main.set_ylim(0, 4200)
-ax_main.set_xlim(32, 3680)
-ax_main.set_title("Señal Efectiva (32-3679)")
-ax_main.set_xlabel("Número de Pixel")
-ax_main.grid(True)
-
-
-# --- 3. DERECHA: DUMMY FINAL (3680-Final) ---
-x_right = np.arange(3680, CCD_PIXELS)
-zeros_right = np.zeros(len(x_right))
-line_right, = ax_right.plot(x_right, zeros_right, 'b.-', markersize=3)
-
-ax_right.set_ylim(0, 4200)
-ax_right.set_title("Fin")
-ax_right.set_yticks([]) # Ocultamos eje Y para limpiar
-ax_right.grid(True)
-
-# Etiqueta
-ax_right.text(3687, 3800, "Dummy\n(3680+)", color='r', ha='center', fontsize=7, rotation=90)
-
-
-plt.tight_layout()
-
-
 def sync_to_header(serial_port):
-    """ Busca la secuencia exacta del header """
     buffer = b''
     while True:
         new_byte = serial_port.read(1)
@@ -92,47 +39,89 @@ def sync_to_header(serial_port):
             buffer = buffer[-len(HEADER_BYTES):]
             
         if buffer == HEADER_BYTES:
-            return
+            return buffer
+
+def calcular_checksum(msg):
+    words = struct.unpack(f'<{len(msg)//2}H', msg)
+    
+    cs = 0x0000 # Semilla
+    for w in words:
+        cs ^= w
+    
+    return cs
+
+def obtener_mensaje_configuracion(serial_port):
+    total_bytes = 10
+    print("Sincronizando al header...")
+    
+    # Esto ya trae los 2 bytes del header
+    raw_data = sync_to_header(serial_port) 
+    print("Header encontrado.")
+
+    # Leemos los 8 bytes restantes (Cmd/Type + Payload + CS)
+    raw_data += serial_port.read(total_bytes - len(HEADER_BYTES))
+    print(f"Mensaje completo recibido: {raw_data.hex()}")
+
+    # Validamos Checksum (usamos todo MENOS los últimos 2 bytes que son el CS recibido)
+    checksum_calculado = calcular_checksum(raw_data[:-2])
+    checksum_recibido = struct.unpack('<H', raw_data[8:10])[0]
+
+    if checksum_calculado != checksum_recibido:
+        print(f"Checksum Error: Calc {checksum_calculado:04X} != Recv {checksum_recibido:04X}")
+        return [-1, -1, 0, 0]
+    
+    # --- CORRECCIÓN 2: Índices correctos ---
+    # raw_data tiene 10 bytes:
+    # 0,1 -> Header
+    # 2 -> Type (Parte baja de la palabra Cmd/Type)
+    # 3 -> Command (Parte alta de la palabra Cmd/Type)
+    # 4,5,6,7 -> Payload (4 bytes)
+    # 8,9 -> Checksum
+    
+    return [
+        raw_data[3],  # Command 
+        raw_data[2],  # Type
+        struct.unpack('<I', raw_data[4:8])[0], # Payload
+        checksum_recibido
+    ]
 
 # --- BUCLE PRINCIPAL ---
 try:
-    print(f"Esperando datos ({PAYLOAD_BYTES} bytes por frame)...")
-    
     while True:
-        sync_to_header(ser)
-        
-        contador += 1
-        if contador < N_FRAMES:
-            ser.read(PAYLOAD_BYTES)
+        msg = obtener_mensaje_configuracion(ser)
+
+        if msg[0] == -1:
+            # print("Error de checksum...")
             continue
 
-        contador = 0
-        
-        # Leer datos
-        raw_data = ser.read(PAYLOAD_BYTES)
+        if msg[0] == COMMAND_ASK_FOR_INTEGRATION_TIME and msg[1] == CONF_MSG:
+            print("Solicitud para ingresar un nuevo tiempo de integración recibida")
 
-        if len(raw_data) != PAYLOAD_BYTES:
-            print("Frame incompleto")
+            # Armamos respuesta (Header + Type + Cmd + Payload)
+            # Nota: Ponemos Type antes que Command para que al unirse sea (CMD<<8)|TYPE
+            msg_response_bytes = HEADER_BYTES + bytes([CONF_MSG]) + bytes([COMMAND_ASK_FOR_INTEGRATION_TIME]) + struct.pack('<I', INTEGRATION_TIME_US)
+            
+            checksum_response = calcular_checksum(msg_response_bytes)
+            msg_response_bytes += struct.pack('<H', checksum_response)
+            print(f"Mensaje de respuesta armado: {msg_response_bytes.hex()}")
+            ser.write(msg_response_bytes)
+            print(f"Respuesta enviada con tiempo de integración: {INTEGRATION_TIME_US} µs")
+
+        msg = obtener_mensaje_configuracion(ser)
+        if msg[0] == -1:
+            # print("Error de checksum...")
             continue
 
-        # Convertir a uint16
-        full_data = np.frombuffer(raw_data, dtype=np.dtype('<u2'))
+        if msg[0] == COMMAND_ASK_FOR_INTEGRATION_TIME and msg[1] == CONF_MSG:
+            tiempo_integracion_recibido = msg[2]
+            print(f"Tiempo de integración confirmado por el microcontrolador: {tiempo_integracion_recibido} µs")
 
-        # --- ACTUALIZAR LOS 3 GRÁFICOS ---
-        
-        # 1. Izquierda: Primeros 32
-        line_left.set_ydata(full_data[:32])
-        
-        # 2. Centro: Del 32 al 3680
-        line_main.set_ydata(full_data[32:3680])
-        
-        # 3. Derecha: Del 3680 al final
-        line_right.set_ydata(full_data[3680:])
-        
-        fig.canvas.draw()
-        fig.canvas.flush_events()
+        break
+
+        # Recibo echo (Opcional, depende de si tu micro responde al recibir la config)
+        # msg_echo = obtener_mensaje_configuracion(ser)
+        # ...
 
 except KeyboardInterrupt:
     print("\nCerrando...")
     ser.close()
-    plt.close()
