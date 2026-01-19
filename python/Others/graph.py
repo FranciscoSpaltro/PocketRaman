@@ -8,14 +8,15 @@ BAUD = 460800
 CCD_PIXELS = 3694
 OVERSAMPLING = 1    # 1 muestra por pixel
 contador = 0
-N_FRAMES = 3       # 4
+N_FRAMES = 4       # 4
 
 # Total de datos que llegan
 TOTAL_POINTS = CCD_PIXELS * OVERSAMPLING 
 PAYLOAD_BYTES = TOTAL_POINTS * 2 
 
-# Header (Little Endian)
-HEADER_BYTES = b'\x52\x46\x4E\x41\xFF\xFF\xFF\xFF'
+# Header
+HEADER_BYTES_1 = b'\x73'    # Cambiar despues para que sea todo unico
+HEADER_BYTES_2 = b'\x46'
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=2)
@@ -41,18 +42,14 @@ plt.tight_layout()
 
 def sync_to_header(serial_port):
     """ Busca la secuencia exacta del header """
-    buffer = b''
     while True:
-        new_byte = serial_port.read(1)
-        if not new_byte:
-            continue
-        
-        buffer += new_byte
-        if len(buffer) > len(HEADER_BYTES):
-            buffer = buffer[-len(HEADER_BYTES):]
-            
-        if buffer == HEADER_BYTES:
-            return
+        byte = ser.read(1)
+        if byte:
+            #print(byte.hex())
+            if byte == b'\x46':
+                next_byte = ser.read(1)
+                if next_byte == b'\x73':
+                    break
 
 try:
     print(f"Esperando datos ({PAYLOAD_BYTES} bytes por frame)...")
@@ -60,19 +57,32 @@ try:
     while True:
         sync_to_header(ser)
         
-        contador += 1
-        if contador < N_FRAMES:
+        #contador += 1
+        #if contador < N_FRAMES:
             # Ignorar los primeros N_FRAMES frames para estabilizar
-            ser.read(PAYLOAD_BYTES)
-            continue
+        #    ser.read(PAYLOAD_BYTES)
+        #    continue
 
         contador = 0
         # 2. Leer el bloque de datos exacto
         raw_data = ser.read(PAYLOAD_BYTES)
-
         if len(raw_data) != PAYLOAD_BYTES:
-            print("Frame incompleto")
+            print("Frame incompleto1")
             continue
+        aux = ser.read(2)
+
+        end_buffer = ser.read(1)
+        if end_buffer:
+            #print(byte.hex())
+            if end_buffer != b'\x47':
+                print(end_buffer.hex())
+                print("Frame incompleto2")
+                continue
+            else:
+                end_buffer = ser.read(1)
+                if end_buffer != b'\x73':
+                    print("Frame incompleto3")
+                    continue
 
         # 3. Convertir a uint16
         # Como OVERSAMPLING = 1, full_data ya es EL array de pixeles final

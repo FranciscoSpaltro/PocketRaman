@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "main.h"
+#include "conf_processing.h"
 
 #define CCD_PIXELS 3694
 #define SH_PIN GPIO_PIN_1

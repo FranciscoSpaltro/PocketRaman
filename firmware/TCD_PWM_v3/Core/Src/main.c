@@ -20,9 +20,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
-//#include "TCD_signals.h"
-//#include "conf_processing.h"
-#include "functions.h"
+#include <string.h>
+#include "TCD_signals.h"
+#include "conf_processing.h"
+//#include "functions.h"
 
 /* USER CODE END Includes */
 
@@ -57,15 +58,19 @@ DMA_HandleTypeDef hdma_usart6_rx;
 
 /* USER CODE BEGIN PV */
 
-extern uint16_t adc_buffer[HEADER_SIZE + CCD_PIXELS];
+extern uint16_t adc_buffer[CCD_PIXELS];
 extern uint32_t sh_ccr[SH_EDGES_MAX];
 extern uint32_t icg_ccr[ICG_EDGES];
 extern volatile int real_SH_EDGES;
 extern volatile uint8_t sistema_listo_para_capturar;
 extern uint32_t TS6_tics;
 extern volatile uint8_t icg_is_high;
+extern uint8_t process_instruction_flag;
+extern uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
+extern uint16_t cmd;
 
-uint8_t rx_cmd_buffer[2];
+extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
+volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS];
 
 /* USER CODE END PV */
 
@@ -123,10 +128,18 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
-  uint32_t t_int_inicial = wait_new_int_time_uart();
+  package_to_send[0] = HEADER;
+  package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = END_BUFFER;
+
   // SH: A1 (canal 2 osciloscopio)
   // ICG: A2 (canal 1 osciloscopio)
 
+  //uint32_t t_int_inicial = wait_new_int_time_uart();
+  int i = 0;
+
+  uint32_t t_int_inicial = 10;
+  if (t_int_inicial  < 100) t_int_inicial  = 100;
+  if (t_int_inicial  > 7000) t_int_inicial = 7000;
   calculate_times(t_int_inicial);
 
   build_SH_table();
@@ -134,26 +147,92 @@ int main(void)
 
   setup_timer_icg_sh();
 
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);		// Se castea a 32 bits por requerimiento de DMA pero esta configurado para tratar el dato como HALF-WORD (16b)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+
+  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
+  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
   HAL_TIM_Base_Start(&htim2);
 
-  HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, 2);
+  HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, SIZE_RX_BUFFER_CMD_8);
+  //HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_cmd_buffer, MAX_SIZE_RX_BUFFER_8);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-	  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+  while (1) {
+
+	  if(process_instruction_flag == 1){
+		  switch(cmd){
+				case SET_INTEGRATION_TIME:
+					HAL_ADC_Stop_DMA(&hadc1);
+					HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_2);
+					HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_3);
+					HAL_TIM_Base_Stop(&htim2);
+					HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+
+					uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
+
+					uint32_t t_int_recibido = (p_words[4] << 16) | p_words[3];
+
+					// Protección: Evitar tiempos absurdos (ej. 0)
+					if (t_int_recibido < 100) t_int_recibido = 100;
+					if (t_int_recibido > 7000) t_int_recibido = 7000;
+
+					calculate_times(t_int_recibido);
+
+					build_SH_table();
+					build_ICG_table();
+
+					setup_timer_icg_sh();
+
+					HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);
+					HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+					HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
+					HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
+					HAL_TIM_Base_Start(&htim2);
+					break;
+
+
+				case RESET_DEVICE:
+					HAL_ADC_Stop_DMA(&hadc1);
+					HAL_TIM_Base_Stop(&htim2);
+					HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+
+					NVIC_SystemReset();
+					break;
+
+				default:
+					break;
+		  }
+
+		  process_instruction_flag = 0;
+		  memset(rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
+
+
+		  //HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_cmd_buffer, MAX_SIZE_RX_BUFFER_8);
+		  //HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, SIZE_RX_BUFFER_CMD_8);
+	  }	// END IF INSTRUCTION FLAG
+
+
+
+
+	  if(i > 10){
+		  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+	  	  i = 0;
+  	  }
+	  i++;
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 
 
-  }
+  }	// END WHILE
+
+
+
   /* USER CODE END 3 */
 }
 
@@ -787,7 +866,10 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     if (hadc->Instance == ADC1)
     {
     	HAL_ADC_Stop_DMA(&hadc1);
-    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)adc_buffer, sizeof(adc_buffer));
+    	for(int i = 0; i < CCD_PIXELS; i++) {
+			package_to_send[1 + i] = adc_buffer[i];
+		}
+    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, sizeof(package_to_send));
     }
 }
 
@@ -808,7 +890,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 
 			sistema_listo_para_capturar = 0;
 
-			HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buffer[HEADER_SIZE], CCD_PIXELS);
+			HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);
 
 		}
 
@@ -820,18 +902,27 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     // Verificamos que sea la UART correcta
     if (huart->Instance == USART6)
     {
-        // Verificamos si el comando es "FS"
-        // 0x46 = 'F', 0x52 = 'R'
-        if (rx_cmd_buffer[0] == 0x46 && rx_cmd_buffer[1] == 0x53)
-        {
-            // Opcional: Apagar periféricos para ser prolijos
-            HAL_ADC_Stop_DMA(&hadc1);
-            HAL_TIM_Base_Stop(&htim2);
-
-            NVIC_SystemReset();
-        }
+        process_instruction();
     }
 }
+
+/*
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart->Instance == USART6) {
+        // 'Size' contiene el número exacto de bytes recibidos (ej: 12, 50, etc.)
+
+        // 1. Guardamos el tamaño para usarlo fuera
+        msg_length = Size;
+
+        process_instruction();
+        // IMPORTANTE:
+        // El DMA se detiene después de un evento IDLE.
+        // Hay que reactivarlo para el siguiente mensaje PERO lo haremos
+        // en el bucle principal después de procesar los datos para no sobrescribir el buffer.
+    }
+}
+*/
 /* USER CODE END 4 */
 
 /**

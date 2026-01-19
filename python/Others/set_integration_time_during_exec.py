@@ -7,9 +7,9 @@ HEADER = 0x7346
 TIMEOUT = 2
 
 HEADER_VAL = 0x7346             # "sF" en ASCII (Little Endian: 0x46, 0x73)
-COMMAND_RESET = 0xF002          # Comando de reset
+SET_INT_TIME_CMD = 0xF001          # Comando de set integration time
 PAYLOAD_SIZE_WORDS = 2          # 2 palabras de 16 bits = 1 uint32_t
-PAYLOAD = 0xFFFFFFFF
+PAYLOAD = 100
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=TIMEOUT)
@@ -33,9 +33,10 @@ def calcular_checksum(data_bytes):
     return cs
 
 try:
-    paquete_sin_cs = struct.pack('<HHI', 
+    paquete_sin_cs = struct.pack('<HHHI', 
                                          HEADER_VAL, 
-                                         COMMAND_RESET, 
+                                         SET_INT_TIME_CMD, 
+                                         PAYLOAD_SIZE_WORDS, 
                                          PAYLOAD)
             
     # 2. Calcular Checksum

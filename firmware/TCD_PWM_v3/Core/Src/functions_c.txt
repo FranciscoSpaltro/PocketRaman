@@ -1,4 +1,4 @@
-#include "functions.h"
+#include <functions_h.txt>
 
 const int initial_n = 6;
 

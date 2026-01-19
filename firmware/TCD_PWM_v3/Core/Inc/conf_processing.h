@@ -4,12 +4,23 @@
 #include <stdint.h>
 #include "main.h"
 
-#define COMMAND_ASK_FOR_INTEGRATION_TIME 0x01
-#define CONF_MSG 0x00
-#define DATA_MSG 0x01
 
-#define HEADER_SIZE 1	// en PALABRAS (2 bytes)
+
+// COMANDOS
+#define HEADER_SIZE_8 									2											// EN BYTES - debe ser múltiplo de 2
+#define HEADER 											0x7346
+#define END_BUFFER										0x7347
+#define SET_INTEGRATION_TIME 							0xF001
+#define RESET_DEVICE 									0xF002
+
+#define COMMAND_ASK_FOR_INTEGRATION_TIME 				0x01
+
+// VALORES
+#define OVERHEAD_8 										6 											// HEADER + CMD + CHECKSUM	- EN BYTES
+#define SIZE_RX_BUFFER_CMD_8 							OVERHEAD_8 + 2 * 2 							// Espacio (en bytes) para 2 palabras de PAYLOAD
 
 uint32_t wait_new_int_time_uart(void);
+uint16_t checksum(uint16_t * vec, uint16_t N);
+void process_instruction(void);
 
 #endif

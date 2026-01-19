@@ -20,13 +20,13 @@ uint32_t TS6_tics = 0;
 uint32_t sh_ccr[SH_EDGES_MAX];
 uint32_t icg_ccr[ICG_EDGES];
 
-uint16_t adc_buffer[1 + CCD_PIXELS];
+uint16_t adc_buffer[CCD_PIXELS];
 
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern ADC_HandleTypeDef hadc1;
 
-
+/*
 void setup_timer_icg_sh(void){
 	__HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
 
@@ -47,6 +47,59 @@ void setup_timer_icg_sh(void){
 	  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
 
 	  __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_CC3);
+}
+*/
+void setup_timer_icg_sh(void){
+    // 1. Periodo y Reset Contador
+    __HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+
+    // 2. Definir Estructura
+    TIM_OC_InitTypeDef sConfigOC = {0};
+
+    // ---------------------------------------------------------
+    // PASO CRÍTICO: FORZAR ESTADO CONOCIDO (RESET DEL PIN)
+    // ---------------------------------------------------------
+    // Esto "plancha" el pin a su estado de reposo antes de empezar a conmutar.
+
+    // --- CANAL 2 (SH) ---
+    // Queremos que arranque en su estado de reposo.
+    // Usamos FORCED_INACTIVE para poner el pin a "0" lógico (según polaridad).
+    sConfigOC.OCMode = TIM_OCMODE_FORCED_INACTIVE;
+    sConfigOC.Pulse = sh_ccr[0];
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW; // Mantener tu polaridad
+    HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2);
+
+    // --- CANAL 3 (ICG) ---
+    sConfigOC.OCMode = TIM_OCMODE_FORCED_INACTIVE;
+    sConfigOC.Pulse = icg_ccr[0];
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3);
+
+    // Generamos un evento para que estos cambios se apliquen INMEDIATAMENTE al pin
+    HAL_TIM_GenerateEvent(&htim2, TIM_EVENTSOURCE_UPDATE);
+
+    // ---------------------------------------------------------
+    // PASO 3: AHORA SÍ, CONFIGURAR EN MODO TOGGLE
+    // ---------------------------------------------------------
+
+    // --- CANAL 2 (SH) ---
+    sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+    sConfigOC.Pulse = sh_ccr[0];
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+    HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2);
+
+    // --- CANAL 3 (ICG) ---
+    sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+    sConfigOC.Pulse = icg_ccr[0];
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3);
+
+    // 4. Preparar DMA (pero no arrancar)
+    __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_UPDATE);
+    __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC2);
+    __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC3);
+    __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_CC3);
 }
 
 void calculate_times(uint32_t t_int_us){
