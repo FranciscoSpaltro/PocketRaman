@@ -4,7 +4,7 @@ import serial
 # --- CONFIGURACIÓN ---
 PORT = "COM7"       # Ajusta a tu puerto
 BAUD = 460800       # Debe coincidir con tu STM32
-
+array = bytearray()
 try:
     ser = serial.Serial(PORT, BAUD, timeout=2)
     ser.flushInput()
@@ -14,10 +14,12 @@ try:
         while True:
             data = ser.read(2)
             if data:
-                print(data.hex())
+                #print(data.hex())
+                array += data
 
     except KeyboardInterrupt:
         print("Cerrando puerto...")
+        print(array.hex())
         ser.close()
 
 except Exception as e:

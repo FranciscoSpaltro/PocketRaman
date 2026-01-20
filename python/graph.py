@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import struct
 
 PORT = "COM7"      
-BAUD = 460800
+#BAUD = 460800
+BAUD = 115200
 CCD_PIXELS = 3694
 N_FRAMES = 4       
 
@@ -54,17 +55,26 @@ try:
             print("Frame incompleto (total)")
             continue
 
-        cmd = array[2:4]
-        raw_data = array[4:4 + PAYLOAD_BYTES]
-        end_buffer = array[4 + PAYLOAD_BYTES + 2: 4 + PAYLOAD_BYTES + 2 + 2]
+        array = np.frombuffer(array, dtype=np.dtype('<u2'))
+        cmd = array[1]
+        raw_data = array[2: 2 + CCD_PIXELS]
+        end_buffer = array[-1]
         
-        if end_buffer != struct.pack('<H', END_BUFFER):
-            print(f"Error de Footer: {end_buffer.hex()}")
+        if end_buffer != END_BUFFER:
+            print(f"Error de Footer: {end_buffer}")
             continue
 
+        
+        # Hago XOR de todos los datos y verifico que de 0
+        xor_sum = 0x0000
+        for val in array:
+            xor_sum ^= val
+
+        if xor_sum != 0x0000:
+            print(f"Error de Checksum: {xor_sum:04x}")
+            continue
         # 6. Graficar
-        full_data = np.frombuffer(raw_data, dtype=np.dtype('<u2'))
-        line.set_ydata(full_data)
+        line.set_ydata(raw_data)
         fig.canvas.draw()
         fig.canvas.flush_events()
 

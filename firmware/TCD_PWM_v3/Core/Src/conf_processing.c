@@ -52,7 +52,7 @@ void process_instruction(void){										// ver si reseteo buffer ante error
 
 	cmd = p_rx_cmd_buffer[1];
 
-	if(checksum(p_rx_cmd_buffer, OVERHEAD_8/2 + 2) != p_rx_cmd_buffer[OVERHEAD_8/2 + 2])
+	if(checksum(p_rx_cmd_buffer, OVERHEAD_8/2 + 2) != 0)		// La recepción no tiene END_BUFFER
 		return;
 
 	process_instruction_flag = 1;

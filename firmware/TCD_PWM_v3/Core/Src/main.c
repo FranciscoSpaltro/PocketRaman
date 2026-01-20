@@ -53,8 +53,8 @@ DMA_HandleTypeDef hdma_tim2_up_ch3;
 DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
-DMA_HandleTypeDef hdma_usart6_tx;
 DMA_HandleTypeDef hdma_usart6_rx;
+DMA_HandleTypeDef hdma_usart6_tx;
 
 /* USER CODE BEGIN PV */
 
@@ -68,7 +68,6 @@ extern volatile uint8_t icg_is_high;
 extern uint8_t process_instruction_flag;
 extern uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
 extern uint16_t cmd;
-
 
 extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
 volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS + 1]; // +1 por el END_BUFFER
@@ -164,7 +163,6 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-
 	  if(process_instruction_flag == 1){
 		  switch(cmd){
 				case SET_INTEGRATION_TIME:
@@ -176,7 +174,7 @@ int main(void)
 
 					uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
 
-					uint32_t t_int_recibido = (p_words[4] << 16) | p_words[3];
+					uint32_t t_int_recibido = (p_words[3] << 16) | p_words[2];
 
 					// Protección: Evitar tiempos absurdos (ej. 0)
 					if (t_int_recibido < 100) t_int_recibido = 100;
@@ -862,28 +860,90 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
     if (hadc->Instance == ADC1)
     {
     	HAL_ADC_Stop_DMA(&hadc1);
 
-    	for(int i = 0; i < CCD_PIXELS; i++) {
-			package_to_send[OVERHEAD_8/2 - 1 + i] = adc_buffer[i];
+    	package_to_send[0] = HEADER;							// [0]
+    	package_to_send[1] = DATA_SENDING;						// [1]
+    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;			// [8]
+    	uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+/*
+    	for(int i = 0; i < 5; i++) {
+    		uint16_t valor_adc = adc_buffer[i];
+			package_to_send[OVERHEAD_8/2 - 1 + i] = valor_adc;	// [2 - 6]
+			cs ^= valor_adc;
 		}
+*/
 
-    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = 0;
+	for(int i = 0; i < CCD_PIXELS; i++) {
+				// EN LUGAR DE ADC_BUFFER, USAMOS 'i'
+				// Convertimos 'i' a 16 bits.
+				// Pixel 0 = 0, Pixel 1 = 1 ... Pixel 3693 = 3693
+				uint16_t valor_fake = (uint16_t)(i & 0xFFFF);
 
-    	uint16_t cs = 0x0000;
-    	for(int i = 0; i < OVERHEAD_8/2 + CCD_PIXELS + 1; i++)
-    		cs ^= package_to_send[i];
-    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+				package_to_send[OVERHEAD_8/2 - 1 + i] = valor_fake;
+				cs ^= valor_fake;
+			}
 
-    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, sizeof(package_to_send));
+    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;				// [7]
+
+    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, (OVERHEAD_8/2 + CCD_PIXELS + 1)*2);
 
 
     }
 }
+
+
+
+/*
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+    if (hadc->Instance == ADC1)
+    {
+        HAL_ADC_Stop_DMA(&hadc1);
+
+        if(uart_tx_busy == 1)
+        	return;
+
+        // 1. Captura atómica de constantes
+        // Al asignarlos a variables locales 'volatile' o simples, forzamos coherencia
+        uint16_t current_cmd = DATA_SENDING;
+        uint16_t current_end = END_BUFFER;
+
+        // 2. Llenado de Cabeceras
+        package_to_send[0] = HEADER;
+        package_to_send[1] = current_cmd;
+
+        // El índice del footer es fijo: Offset(3) + Pixeles
+        // Usamos indices relativos para que si cambias CCD_PIXELS no se rompa
+        package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = current_end;
+
+        // 3. Calculo inicial del Checksum
+        uint16_t cs = HEADER ^ current_cmd ^ current_end;
+
+        // 4. Bucle de datos (Copia + Checksum)
+        for(int i = 0; i < CCD_PIXELS; i++) {
+            uint16_t valor_adc = adc_buffer[i];
+
+            // Offset de 2 (Header + Cmd)
+            package_to_send[2 + i] = valor_adc;
+
+            cs ^= valor_adc;
+        }
+
+        // 5. Guardar Checksum
+        // Va justo antes del Footer
+        package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+
+        uart_tx_busy = 1;
+
+        HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, sizeof(package_to_send));
+    }
+}*/
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
