@@ -69,8 +69,9 @@ extern uint8_t process_instruction_flag;
 extern uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
 extern uint16_t cmd;
 
+
 extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
-volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS];
+volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS + 1]; // +1 por el END_BUFFER
 
 /* USER CODE END PV */
 
@@ -129,7 +130,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   package_to_send[0] = HEADER;
-  package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = END_BUFFER;
+  package_to_send[1] = DATA_SENDING;
+  package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
   // SH: A1 (canal 2 osciloscopio)
   // ICG: A2 (canal 1 osciloscopio)
@@ -862,14 +864,24 @@ static void MX_GPIO_Init(void)
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-    // Verificamos que sea el ADC1 (por buenas prácticas)
     if (hadc->Instance == ADC1)
     {
     	HAL_ADC_Stop_DMA(&hadc1);
+
     	for(int i = 0; i < CCD_PIXELS; i++) {
-			package_to_send[1 + i] = adc_buffer[i];
+			package_to_send[OVERHEAD_8/2 - 1 + i] = adc_buffer[i];
 		}
+
+    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = 0;
+
+    	uint16_t cs = 0x0000;
+    	for(int i = 0; i < OVERHEAD_8/2 + CCD_PIXELS + 1; i++)
+    		cs ^= package_to_send[i];
+    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+
     	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, sizeof(package_to_send));
+
+
     }
 }
 
@@ -906,23 +918,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 
-/*
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
-{
-    if (huart->Instance == USART6) {
-        // 'Size' contiene el número exacto de bytes recibidos (ej: 12, 50, etc.)
 
-        // 1. Guardamos el tamaño para usarlo fuera
-        msg_length = Size;
-
-        process_instruction();
-        // IMPORTANTE:
-        // El DMA se detiene después de un evento IDLE.
-        // Hay que reactivarlo para el siguiente mensaje PERO lo haremos
-        // en el bucle principal después de procesar los datos para no sobrescribir el buffer.
-    }
-}
-*/
 /* USER CODE END 4 */
 
 /**

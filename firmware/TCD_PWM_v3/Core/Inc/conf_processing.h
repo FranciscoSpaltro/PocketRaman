@@ -12,11 +12,12 @@
 #define END_BUFFER										0x7347
 #define SET_INTEGRATION_TIME 							0xF001
 #define RESET_DEVICE 									0xF002
+#define DATA_SENDING									0xF003
 
 #define COMMAND_ASK_FOR_INTEGRATION_TIME 				0x01
 
 // VALORES
-#define OVERHEAD_8 										6 											// HEADER + CMD + CHECKSUM	- EN BYTES
+#define OVERHEAD_8 										6 											// HEADER + CMD + CHECKSUM - EN BYTES
 #define SIZE_RX_BUFFER_CMD_8 							OVERHEAD_8 + 2 * 2 							// Espacio (en bytes) para 2 palabras de PAYLOAD
 
 uint32_t wait_new_int_time_uart(void);
