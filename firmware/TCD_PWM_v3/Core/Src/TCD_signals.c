@@ -1,4 +1,4 @@
-#include "TCD_signals.h"
+#include <tcd_signals.h>
 
 const int initial_n = 6;
 
@@ -20,7 +20,8 @@ uint32_t TS6_tics = 0;
 uint32_t sh_ccr[SH_EDGES_MAX];
 uint32_t icg_ccr[ICG_EDGES];
 
-uint16_t adc_buffer[CCD_PIXELS];
+//volatile uint16_t adc_buffer[CCD_PIXELS];
+
 
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;

@@ -2,8 +2,8 @@
 #define TCD_SIGNALS_H
 
 #include <stdint.h>
+#include <tcd_process_instructions.h>
 #include "main.h"
-#include "conf_processing.h"
 
 #define CCD_PIXELS 3694
 #define SH_PIN GPIO_PIN_1

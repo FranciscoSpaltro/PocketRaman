@@ -1,4 +1,4 @@
-#include "conf_processing.h"
+#include <tcd_process_instructions.h>
 
 
 // ADC va de 0-4095 asique valores sobre 0x0FFF son headers adecuados; 16 bits para que se alinee facil con los mensajes DMA ADC

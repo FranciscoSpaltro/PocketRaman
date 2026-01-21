@@ -3,9 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import struct
 
+nombre_archivo_export = "error.txt"
 PORT = "COM7"      
-#BAUD = 460800
-BAUD = 115200
+BAUD = 460800
+#BAUD = 115200
 CCD_PIXELS = 3694
 N_FRAMES = 4       
 
@@ -62,7 +63,7 @@ try:
         
         if end_buffer != END_BUFFER:
             print(f"Error de Footer: {end_buffer}")
-            continue
+            #continue
 
         
         # Hago XOR de todos los datos y verifico que de 0
@@ -72,7 +73,13 @@ try:
 
         if xor_sum != 0x0000:
             print(f"Error de Checksum: {xor_sum:04x}")
-            continue
+            #exporto el array
+            #with open(nombre_archivo_export, "w") as f:
+            #    for val in array:
+            #        f.write(f"{val:04x} ")
+            #break
+            
+            #continue
         # 6. Graficar
         line.set_ydata(raw_data)
         fig.canvas.draw()

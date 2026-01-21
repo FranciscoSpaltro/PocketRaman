@@ -21,8 +21,9 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "TCD_signals.h"
-#include "conf_processing.h"
+#include <tcd_process_instructions.h>
+#include <tcd_signals.h>
+#include <tcd_sdram_manage.h>
 //#include "functions.h"
 
 /* USER CODE END Includes */
@@ -56,9 +57,11 @@ UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
 DMA_HandleTypeDef hdma_usart6_tx;
 
+SDRAM_HandleTypeDef hsdram1;
+
 /* USER CODE BEGIN PV */
 
-extern uint16_t adc_buffer[CCD_PIXELS];
+//extern uint16_t adc_buffer[CCD_PIXELS];
 extern uint32_t sh_ccr[SH_EDGES_MAX];
 extern uint32_t icg_ccr[ICG_EDGES];
 extern volatile int real_SH_EDGES;
@@ -70,7 +73,8 @@ extern uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
 extern uint16_t cmd;
 
 extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
-volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS + 1]; // +1 por el END_BUFFER
+//volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS + 1]; // +1 por el END_BUFFER
+volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
 
 /* USER CODE END PV */
 
@@ -82,7 +86,9 @@ static void MX_USART6_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_FMC_Init(void);
 /* USER CODE BEGIN PFP */
+
 
 /* USER CODE END PFP */
 
@@ -126,11 +132,18 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_FMC_Init();
   /* USER CODE BEGIN 2 */
 
-  package_to_send[0] = HEADER;
-  package_to_send[1] = DATA_SENDING;
-  package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
+
+  volatile uint32_t *p = (uint32_t*)0xC0000000;  // confirmalo en el .ld
+  p[0] = 0x12345678;
+  p[1] = 0xA5A5A5A5;
+  if (p[0] != 0x12345678 || p[1] != 0xA5A5A5A5) Error_Handler();
+
+  //package_to_send[0] = HEADER;
+  //package_to_send[1] = DATA_SENDING;
+  //package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
   // SH: A1 (canal 2 osciloscopio)
   // ICG: A2 (canal 1 osciloscopio)
@@ -148,7 +161,7 @@ int main(void)
 
   setup_timer_icg_sh();
 
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);		// Se castea a 32 bits por requerimiento de DMA pero esta configurado para tratar el dato como HALF-WORD (16b)
+  //HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);		// Se castea a 32 bits por requerimiento de DMA pero esta configurado para tratar el dato como HALF-WORD (16b)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
   HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
@@ -187,7 +200,7 @@ int main(void)
 
 					setup_timer_icg_sh();
 
-					HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);
+					HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&tx_packet_buffer[2], CCD_PIXELS);
 					HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 					HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
 					HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
@@ -534,6 +547,53 @@ static void MX_DMA_Init(void)
 
 }
 
+/* FMC initialization function */
+static void MX_FMC_Init(void)
+{
+
+  /* USER CODE BEGIN FMC_Init 0 */
+
+  /* USER CODE END FMC_Init 0 */
+
+  FMC_SDRAM_TimingTypeDef SdramTiming = {0};
+
+  /* USER CODE BEGIN FMC_Init 1 */
+
+  /* USER CODE END FMC_Init 1 */
+
+  /** Perform the SDRAM1 memory initialization sequence
+  */
+  hsdram1.Instance = FMC_SDRAM_DEVICE;
+  /* hsdram1.Init */
+  hsdram1.Init.SDBank = FMC_SDRAM_BANK1;
+  hsdram1.Init.ColumnBitsNumber = FMC_SDRAM_COLUMN_BITS_NUM_8;
+  hsdram1.Init.RowBitsNumber = FMC_SDRAM_ROW_BITS_NUM_12;
+  hsdram1.Init.MemoryDataWidth = FMC_SDRAM_MEM_BUS_WIDTH_32;
+  hsdram1.Init.InternalBankNumber = FMC_SDRAM_INTERN_BANKS_NUM_4;
+  hsdram1.Init.CASLatency = FMC_SDRAM_CAS_LATENCY_3;
+  hsdram1.Init.WriteProtection = FMC_SDRAM_WRITE_PROTECTION_DISABLE;
+  hsdram1.Init.SDClockPeriod = FMC_SDRAM_CLOCK_PERIOD_2;
+  hsdram1.Init.ReadBurst = FMC_SDRAM_RBURST_ENABLE;
+  hsdram1.Init.ReadPipeDelay = FMC_SDRAM_RPIPE_DELAY_0;
+  /* SdramTiming */
+  SdramTiming.LoadToActiveDelay = 2;
+  SdramTiming.ExitSelfRefreshDelay = 6;
+  SdramTiming.SelfRefreshTime = 4;
+  SdramTiming.RowCycleDelay = 6;
+  SdramTiming.WriteRecoveryTime = 2;
+  SdramTiming.RPDelay = 2;
+  SdramTiming.RCDDelay = 2;
+
+  if (HAL_SDRAM_Init(&hsdram1, &SdramTiming) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* USER CODE BEGIN FMC_Init 2 */
+  SDRAM_Initialization_Sequence(&hsdram1);
+  /* USER CODE END FMC_Init 2 */
+}
+
 /**
   * @brief GPIO Initialization Function
   * @param None
@@ -595,18 +655,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : FMC_NBL1_Pin FMC_NBL0_Pin D5_Pin D6_Pin
-                           D8_Pin D11_Pin D4_Pin D7_Pin
-                           D9_Pin D12_Pin D10_Pin */
-  GPIO_InitStruct.Pin = FMC_NBL1_Pin|FMC_NBL0_Pin|D5_Pin|D6_Pin
-                          |D8_Pin|D11_Pin|D4_Pin|D7_Pin
-                          |D9_Pin|D12_Pin|D10_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
   /*Configure GPIO pin : PB8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -647,16 +695,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF10_QSPI;
   HAL_GPIO_Init(QSPI_BK1_NCS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : SDNCAS_Pin SDCLK_Pin A11_Pin A10_Pin
-                           PG5 PG4 */
-  GPIO_InitStruct.Pin = SDNCAS_Pin|SDCLK_Pin|A11_Pin|A10_Pin
-                          |GPIO_PIN_5|GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
-
   /*Configure GPIO pin : MIC_DATA_Pin */
   GPIO_InitStruct.Pin = MIC_DATA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -664,16 +702,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
   HAL_GPIO_Init(MIC_DATA_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : D2_Pin D3_Pin D15_Pin D0_Pin
-                           D14_Pin D13_Pin */
-  GPIO_InitStruct.Pin = D2_Pin|D3_Pin|D15_Pin|D0_Pin
-                          |D14_Pin|D13_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pins : USB_FS1_P_Pin USB_FS1_N_Pin USB_FS1_ID_Pin */
   GPIO_InitStruct.Pin = USB_FS1_P_Pin|USB_FS1_N_Pin|USB_FS1_ID_Pin;
@@ -683,36 +711,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : FMC_NBL2_Pin D27_Pin D26_Pin FMC_NBL3_Pin
-                           D29_Pin D31_Pin D28_Pin D25_Pin
-                           D30_Pin D24_Pin */
-  GPIO_InitStruct.Pin = FMC_NBL2_Pin|D27_Pin|D26_Pin|FMC_NBL3_Pin
-                          |D29_Pin|D31_Pin|D28_Pin|D25_Pin
-                          |D30_Pin|D24_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
-
   /*Configure GPIO pins : LED3_Pin LED2_Pin */
   GPIO_InitStruct.Pin = LED3_Pin|LED2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : A0_Pin A1_Pin A2_Pin A3_Pin
-                           A4_Pin A5_Pin A6_Pin A9_Pin
-                           A7_Pin A8_Pin SDNMT48LC4M32B2B5_6A_RAS_RAS___Pin */
-  GPIO_InitStruct.Pin = A0_Pin|A1_Pin|A2_Pin|A3_Pin
-                          |A4_Pin|A5_Pin|A6_Pin|A9_Pin
-                          |A7_Pin|A8_Pin|SDNMT48LC4M32B2B5_6A_RAS_RAS___Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LED4_Pin */
   GPIO_InitStruct.Pin = LED4_Pin;
@@ -728,18 +732,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF12_SDIO;
   HAL_GPIO_Init(uSD_CMD_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : D23_Pin D21_Pin D22_Pin SDNE0_Pin
-                           SDCKE0_Pin D20_Pin D17_Pin D19_Pin
-                           D16_Pin D18_Pin */
-  GPIO_InitStruct.Pin = D23_Pin|D21_Pin|D22_Pin|SDNE0_Pin
-                          |SDCKE0_Pin|D20_Pin|D17_Pin|D19_Pin
-                          |D16_Pin|D18_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
   /*Configure GPIO pins : I2C2_SCL_Pin I2C2_SDA_Pin */
   GPIO_InitStruct.Pin = I2C2_SCL_Pin|I2C2_SDA_Pin;
@@ -772,14 +764,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF9_QSPI;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD15 MIC_CK_Pin */
-  GPIO_InitStruct.Pin = GPIO_PIN_15|MIC_CK_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
   /*Configure GPIO pins : QSPI_BK1_IO1_Pin QSPI_BK1_IO0_Pin */
   GPIO_InitStruct.Pin = QSPI_BK1_IO1_Pin|QSPI_BK1_IO0_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -788,20 +772,20 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF10_QSPI;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SDNWE_Pin */
-  GPIO_InitStruct.Pin = SDNWE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF12_FMC;
-  HAL_GPIO_Init(SDNWE_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pins : OTG_FS1_PowerSwitchOn_Pin EXT_RESET_Pin */
   GPIO_InitStruct.Pin = OTG_FS1_PowerSwitchOn_Pin|EXT_RESET_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MIC_CK_Pin */
+  GPIO_InitStruct.Pin = MIC_CK_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;
+  HAL_GPIO_Init(MIC_CK_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : uSD_Detect_Pin */
   GPIO_InitStruct.Pin = uSD_Detect_Pin;
@@ -866,19 +850,16 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     if (hadc->Instance == ADC1)
     {
     	HAL_ADC_Stop_DMA(&hadc1);
-
-    	package_to_send[0] = HEADER;							// [0]
-    	package_to_send[1] = DATA_SENDING;						// [1]
-    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;			// [8]
+    	tx_packet_buffer[0] = HEADER;							// [0]
+    	tx_packet_buffer[1] = DATA_SENDING;						// [1]
+    	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;			// [8]
     	uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
-/*
-    	for(int i = 0; i < 5; i++) {
-    		uint16_t valor_adc = adc_buffer[i];
-			package_to_send[OVERHEAD_8/2 - 1 + i] = valor_adc;	// [2 - 6]
-			cs ^= valor_adc;
-		}
-*/
 
+    	for(int i = 0; i < CCD_PIXELS; i++) {
+			cs ^= tx_packet_buffer[2+i];
+		}
+
+    	/*
 	for(int i = 0; i < CCD_PIXELS; i++) {
 				// EN LUGAR DE ADC_BUFFER, USAMOS 'i'
 				// Convertimos 'i' a 16 bits.
@@ -889,9 +870,10 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 				cs ^= valor_fake;
 			}
 
-    	package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;				// [7]
+			*/
+    	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;				// [7]
 
-    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, (OVERHEAD_8/2 + CCD_PIXELS + 1)*2);
+    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
 
 
     }
@@ -958,11 +940,14 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 
 		icg_is_high ^= 1;
 
+		if(huart6.gState != HAL_UART_STATE_READY)
+			return;
+
 		if(icg_is_high == 1){
 
 			sistema_listo_para_capturar = 0;
 
-			HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);
+			HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&tx_packet_buffer[2], CCD_PIXELS);
 
 		}
 
