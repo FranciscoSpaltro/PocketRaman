@@ -84,6 +84,7 @@ try:
         line.set_ydata(raw_data)
         fig.canvas.draw()
         fig.canvas.flush_events()
+        print("Frame recibido correctamente.")
 
 except KeyboardInterrupt:
     print("\nCerrando...")

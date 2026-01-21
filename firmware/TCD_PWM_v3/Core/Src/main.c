@@ -55,6 +55,7 @@ DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
+DMA_HandleTypeDef hdma_usart6_tx;
 
 SDRAM_HandleTypeDef hsdram1;
 
@@ -63,6 +64,7 @@ SDRAM_HandleTypeDef hsdram1;
 extern volatile size_t read_frame_idx;
 extern volatile size_t free_frame_space;
 extern volatile size_t saved_frames;
+extern volatile size_t frames_to_send;
 extern volatile uint16_t * new_frame;
 extern volatile uint16_t * read_frame;
 
@@ -83,6 +85,7 @@ volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
 volatile uint8_t send_now = 0;
 volatile uint16_t number_of_accumulations = 10;
 volatile uint8_t adc_busy = 0;
+volatile uint8_t uart_busy = 0;
 volatile uint8_t acq_enabled = 1;
 /* USER CODE END PV */
 
@@ -171,13 +174,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1) {
 	  if (send_now == 1) {
-	      send_now = 0;
+	      //send_now = 0;
 
-	      uint16_t frames_to_send = saved_frames;  // snapshot
-	      read_frame_idx = 0;
-
-	      while (read_frame_idx < frames_to_send) {
-
+		  if (read_frame_idx >= frames_to_send) {
+		          send_now = 0;
+		          uart_busy = 0;   // por si quedó algo raro
+		  } else if (uart_busy == 0) {
+	    	  uart_busy = 1;
 	          volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];
 
 	          // Si DMA escribió en SDRAM y SDRAM es cacheable:
@@ -197,7 +200,7 @@ int main(void)
 
 	          tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
 
-	          HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
+	          HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
 
 	          read_frame_idx++;
 	      }
@@ -569,6 +572,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
+  /* DMA2_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 
 }
 
@@ -878,11 +884,15 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     	new_frame += CCD_PIXELS;
 		free_frame_space--;
 		saved_frames++;
-		number_of_accumulations--;
+		if(number_of_accumulations > 0)
+			number_of_accumulations--;
+
 		adc_busy = 0;
 
-		if(number_of_accumulations < 1){
+		if(number_of_accumulations == 0){
 			send_now = 1;
+			frames_to_send = saved_frames;
+			read_frame_idx = 0;
 		}
 
     }
@@ -895,6 +905,10 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart->Instance == USART6){
 		//sistema_listo_para_capturar = 1;
+		if(read_frame_idx < frames_to_send){
+			//send_now = 0;
+			uart_busy = 0;
+		}
 	}
 }
 
