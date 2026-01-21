@@ -55,11 +55,17 @@ DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
-DMA_HandleTypeDef hdma_usart6_tx;
 
 SDRAM_HandleTypeDef hsdram1;
 
 /* USER CODE BEGIN PV */
+
+extern volatile size_t read_frame_idx;
+extern volatile size_t free_frame_space;
+extern volatile size_t saved_frames;
+extern volatile uint16_t * new_frame;
+extern volatile uint16_t * read_frame;
+
 
 //extern uint16_t adc_buffer[CCD_PIXELS];
 extern uint32_t sh_ccr[SH_EDGES_MAX];
@@ -73,9 +79,11 @@ extern uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
 extern uint16_t cmd;
 
 extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
-//volatile uint16_t package_to_send[OVERHEAD_8/2 + CCD_PIXELS + 1]; // +1 por el END_BUFFER
 volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
-
+volatile uint8_t send_now = 0;
+volatile uint16_t number_of_accumulations = 10;
+volatile uint8_t adc_busy = 0;
+volatile uint8_t acq_enabled = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -135,19 +143,6 @@ int main(void)
   MX_FMC_Init();
   /* USER CODE BEGIN 2 */
 
-
-  volatile uint32_t *p = (uint32_t*)0xC0000000;  // confirmalo en el .ld
-  p[0] = 0x12345678;
-  p[1] = 0xA5A5A5A5;
-  if (p[0] != 0x12345678 || p[1] != 0xA5A5A5A5) Error_Handler();
-
-  //package_to_send[0] = HEADER;
-  //package_to_send[1] = DATA_SENDING;
-  //package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
-
-  // SH: A1 (canal 2 osciloscopio)
-  // ICG: A2 (canal 1 osciloscopio)
-
   //uint32_t t_int_inicial = wait_new_int_time_uart();
   int i = 0;
 
@@ -169,13 +164,46 @@ int main(void)
   HAL_TIM_Base_Start(&htim2);
 
   HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, SIZE_RX_BUFFER_CMD_8);
-  //HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_cmd_buffer, MAX_SIZE_RX_BUFFER_8);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
+	  if (send_now == 1) {
+	      send_now = 0;
+
+	      uint16_t frames_to_send = saved_frames;  // snapshot
+	      read_frame_idx = 0;
+
+	      while (read_frame_idx < frames_to_send) {
+
+	          volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];
+
+	          // Si DMA escribió en SDRAM y SDRAM es cacheable:
+	          dcache_invalidate_range((const void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
+
+	          tx_packet_buffer[0] = HEADER;
+	          tx_packet_buffer[1] = DATA_SENDING;
+	          tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
+
+	          uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+
+	          for (int i = 0; i < CCD_PIXELS; i++) {
+	              uint16_t value = frame_ptr[i];
+	              tx_packet_buffer[2 + i] = value;
+	              cs ^= value;
+	          }
+
+	          tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+
+	          HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
+
+	          read_frame_idx++;
+	      }
+	  }
+
+
 	  if(process_instruction_flag == 1){
 		  switch(cmd){
 				case SET_INTEGRATION_TIME:
@@ -501,7 +529,7 @@ static void MX_USART6_UART_Init(void)
 
   /* USER CODE END USART6_Init 1 */
   huart6.Instance = USART6;
-  huart6.Init.BaudRate = 460800;
+  huart6.Init.BaudRate = 115200;
   huart6.Init.WordLength = UART_WORDLENGTH_8B;
   huart6.Init.StopBits = UART_STOPBITS_1;
   huart6.Init.Parity = UART_PARITY_NONE;
@@ -541,9 +569,6 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
-  /* DMA2_Stream6_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 
 }
 
@@ -850,105 +875,47 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     if (hadc->Instance == ADC1)
     {
     	HAL_ADC_Stop_DMA(&hadc1);
-    	tx_packet_buffer[0] = HEADER;							// [0]
-    	tx_packet_buffer[1] = DATA_SENDING;						// [1]
-    	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;			// [8]
-    	uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+    	new_frame += CCD_PIXELS;
+		free_frame_space--;
+		saved_frames++;
+		number_of_accumulations--;
+		adc_busy = 0;
 
-    	for(int i = 0; i < CCD_PIXELS; i++) {
-			cs ^= tx_packet_buffer[2+i];
+		if(number_of_accumulations < 1){
+			send_now = 1;
 		}
-
-    	/*
-	for(int i = 0; i < CCD_PIXELS; i++) {
-				// EN LUGAR DE ADC_BUFFER, USAMOS 'i'
-				// Convertimos 'i' a 16 bits.
-				// Pixel 0 = 0, Pixel 1 = 1 ... Pixel 3693 = 3693
-				uint16_t valor_fake = (uint16_t)(i & 0xFFFF);
-
-				package_to_send[OVERHEAD_8/2 - 1 + i] = valor_fake;
-				cs ^= valor_fake;
-			}
-
-			*/
-    	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;				// [7]
-
-    	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
-
 
     }
 }
 
 
 
-/*
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
-{
-    if (hadc->Instance == ADC1)
-    {
-        HAL_ADC_Stop_DMA(&hadc1);
-
-        if(uart_tx_busy == 1)
-        	return;
-
-        // 1. Captura atómica de constantes
-        // Al asignarlos a variables locales 'volatile' o simples, forzamos coherencia
-        uint16_t current_cmd = DATA_SENDING;
-        uint16_t current_end = END_BUFFER;
-
-        // 2. Llenado de Cabeceras
-        package_to_send[0] = HEADER;
-        package_to_send[1] = current_cmd;
-
-        // El índice del footer es fijo: Offset(3) + Pixeles
-        // Usamos indices relativos para que si cambias CCD_PIXELS no se rompa
-        package_to_send[OVERHEAD_8/2 + CCD_PIXELS] = current_end;
-
-        // 3. Calculo inicial del Checksum
-        uint16_t cs = HEADER ^ current_cmd ^ current_end;
-
-        // 4. Bucle de datos (Copia + Checksum)
-        for(int i = 0; i < CCD_PIXELS; i++) {
-            uint16_t valor_adc = adc_buffer[i];
-
-            // Offset de 2 (Header + Cmd)
-            package_to_send[2 + i] = valor_adc;
-
-            cs ^= valor_adc;
-        }
-
-        // 5. Guardar Checksum
-        // Va justo antes del Footer
-        package_to_send[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
-
-        uart_tx_busy = 1;
-
-        HAL_UART_Transmit_DMA(&huart6, (uint8_t*)package_to_send, sizeof(package_to_send));
-    }
-}*/
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart->Instance == USART6){
-		sistema_listo_para_capturar = 1;
+		//sistema_listo_para_capturar = 1;
 	}
 }
 
 void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim->Instance == TIM2 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3 && sistema_listo_para_capturar == 1){
+	if (htim->Instance == TIM2 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3 /*&& sistema_listo_para_capturar == 1*/){
 
 		icg_is_high ^= 1;
 
-		if(huart6.gState != HAL_UART_STATE_READY)
-			return;
-
 		if(icg_is_high == 1){
+			if(acq_enabled == 0) return;
+			if(adc_busy == 1) return;
 
-			sistema_listo_para_capturar = 0;
-
-			HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&tx_packet_buffer[2], CCD_PIXELS);
-
+			//sistema_listo_para_capturar = 0;
+			if(number_of_accumulations > 0){
+				if(free_frame_space < 1) return;
+				adc_busy = 1;
+				HAL_ADC_Start_DMA(&hadc1, (uint32_t*)new_frame, CCD_PIXELS);
+			} else {
+				acq_enabled = 0;
+			}
 		}
 
     }

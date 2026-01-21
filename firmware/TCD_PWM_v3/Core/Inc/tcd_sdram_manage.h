@@ -40,5 +40,6 @@
 #include "cachel1_armv7.h"														// Para SCB_InvalidateDCache_by_Addr()
 
 void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram);
+void dcache_invalidate_range(const void *addr, size_t len);
 
 #endif

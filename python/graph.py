@@ -5,8 +5,8 @@ import struct
 
 nombre_archivo_export = "error.txt"
 PORT = "COM7"      
-BAUD = 460800
-#BAUD = 115200
+#BAUD = 460800
+BAUD = 115200
 CCD_PIXELS = 3694
 N_FRAMES = 4       
 
@@ -63,7 +63,7 @@ try:
         
         if end_buffer != END_BUFFER:
             print(f"Error de Footer: {end_buffer}")
-            #continue
+            continue
 
         
         # Hago XOR de todos los datos y verifico que de 0
@@ -79,7 +79,7 @@ try:
             #        f.write(f"{val:04x} ")
             #break
             
-            #continue
+            continue
         # 6. Graficar
         line.set_ydata(raw_data)
         fig.canvas.draw()

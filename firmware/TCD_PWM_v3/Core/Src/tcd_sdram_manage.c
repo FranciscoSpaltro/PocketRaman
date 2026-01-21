@@ -1,7 +1,10 @@
 #include "tcd_sdram_manage.h"
 
 volatile uint16_t * new_frame = (uint16_t *) SDRAM_BANK_ADDR;
-volatile uint16_t free_frame_space = 2000;							// 128 Mbit de SDRAM; cada frame es 3694*16=59104 bits -> entran 2165 frames
+volatile uint16_t * read_frame = (uint16_t *) SDRAM_BANK_ADDR;
+volatile size_t read_frame_idx = 0;
+volatile size_t free_frame_space = 2000;							// 128 Mbit = 16 MB de SDRAM; cada frame es 3694*2 bytes=7388 bytes -> entran 2269 frames
+volatile size_t saved_frames = 0;
 
 void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram)
 {
@@ -52,3 +55,13 @@ void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram)
     HAL_SDRAM_ProgramRefreshRate(hsdram, 1386);
 }
 
+
+void dcache_invalidate_range(const void *addr, size_t len)
+{
+    // DCache line = 32 bytes en Cortex-M7
+    uintptr_t a = (uintptr_t)addr;
+    uintptr_t a32 = a & ~((uintptr_t)31);              // baja a múltiplo de 32
+    size_t len32 = (size_t)((a + len + 31) - a32) & ~(size_t)31; // sube a múltiplo de 32
+
+    SCB_InvalidateDCache_by_Addr((uint32_t*)a32, (int32_t)len32);
+}
