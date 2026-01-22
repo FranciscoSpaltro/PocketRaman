@@ -5,8 +5,8 @@ import struct
 
 nombre_archivo_export = "error.txt"
 PORT = "COM7"      
-#BAUD = 460800
-BAUD = 115200
+BAUD = 460800
+#BAUD = 115200
 CCD_PIXELS = 3694
 N_FRAMES = 4       
 
