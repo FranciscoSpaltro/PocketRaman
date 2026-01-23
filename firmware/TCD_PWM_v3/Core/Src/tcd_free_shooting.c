@@ -1,7 +1,7 @@
 #include "tcd_free_shooting.h"
 
 volatile uint16_t fs_frames[2][CCD_PIXELS];
-volatile uint8_t free_shooting = 0;
+volatile uint8_t free_shooting = 1;
 volatile uint8_t cap_idx = 0;
 volatile uint8_t send_idx = 0;
 volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
@@ -65,30 +65,37 @@ void send_data_accumulation(void){
 }
 
 void send_data_free_shooting_dma(void){
-	if(ready_to_read == 1){
-	  if(uart_busy == 1)
-		  return;
+    // CORRECCIÓN 1: Usar la bandera correcta (fs_data_available)
+    if(fs_data_available == 1){
+        if(uart_busy == 1)
+            return;
 
-	  ready_to_read = 0;
-	  uart_busy = 1;
+        fs_data_available = 0; // Limpiamos la bandera
+        uart_busy = 1;
 
-	  tx_packet_buffer[0] = HEADER;
-	  tx_packet_buffer[1] = DATA_SENDING;
-	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
+        // CORRECCIÓN 2: Invalidar caché antes de que la CPU lea el buffer llenado por DMA
+        // Obtenemos el puntero al buffer que vamos a leer
+        uint16_t *frame_ptr = (uint16_t*)fs_frames[send_idx];
+        dcache_invalidate_range((void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
 
-	  uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
-	  uint8_t idx = send_idx;
-	  for (int i = 0; i < CCD_PIXELS; i++) {
-		  uint16_t value = fs_frames[idx][i];
-		  tx_packet_buffer[2 + i] = value;
-		  cs ^= value;
-	  }
+        tx_packet_buffer[0] = HEADER;
+        tx_packet_buffer[1] = DATA_SENDING;
+        tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
-	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+        uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+        uint8_t idx = send_idx;
 
-	  HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
+        // Ahora es seguro leer fs_frames[idx]
+        for (int i = 0; i < CCD_PIXELS; i++) {
+            uint16_t value = fs_frames[idx][i];
+            tx_packet_buffer[2 + i] = value;
+            cs ^= value;
+        }
 
-  }
+        tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+
+        HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
+    }
 }
 
 void send_data_free_shooting(void){

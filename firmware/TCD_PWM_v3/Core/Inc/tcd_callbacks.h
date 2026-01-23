@@ -37,5 +37,6 @@ extern volatile uint8_t acq_enabled;
 extern volatile uint8_t free_shooting;
 extern volatile uint8_t ready_to_read;
 extern volatile uint8_t fs_data_available;
+extern volatile uint8_t processing;
 
 #endif

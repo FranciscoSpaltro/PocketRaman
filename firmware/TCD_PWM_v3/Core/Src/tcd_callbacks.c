@@ -7,7 +7,7 @@ volatile uint8_t uart_busy = 0;
 volatile uint8_t acq_enabled = 1;
 volatile uint8_t ready_to_read = 0;
 volatile uint8_t fs_data_available = 0;
-
+volatile uint8_t processing = 0;
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     if (hadc->Instance == ADC1) {

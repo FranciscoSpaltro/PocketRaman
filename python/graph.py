@@ -8,12 +8,13 @@ PORT = "COM7"
 BAUD = 460800
 #BAUD = 115200
 CCD_PIXELS = 3694
-N_FRAMES = 4       
-
+N_FRAMES = 1   
 PAYLOAD_BYTES = CCD_PIXELS * 2 
 
 HEADER_BYTES = 0x7346
 END_BUFFER = 0x7347 
+
+CONTADOR = 0
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=2)
@@ -26,7 +27,9 @@ plt.ion()
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 zeros = np.zeros(CCD_PIXELS)
 line, = ax.plot(zeros, color='blue')
-ax.set_ylim(0, 4200)
+#ax.set_ylim(0, 4200)
+#ax.set_ylim(750, 3000)
+ax.set_ylim(-100, 100)
 ax.set_ylabel("Amplitud (ADC)")
 ax.set_xlabel("Número de Pixel")
 ax.set_title(f"Señal CCD en Tiempo Real ({CCD_PIXELS} pixeles)")
@@ -81,10 +84,15 @@ try:
             
             continue
         # 6. Graficar
-        line.set_ydata(raw_data)
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-        print("Frame recibido correctamente.")
+        if CONTADOR == N_FRAMES - 1:
+            line.set_ydata(raw_data)
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+            print("Frame recibido correctamente.")
+            CONTADOR = 0
+        else:
+            CONTADOR += 1
+      
 
 except KeyboardInterrupt:
     print("\nCerrando...")

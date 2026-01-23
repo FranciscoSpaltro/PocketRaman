@@ -57,6 +57,7 @@ DMA_HandleTypeDef hdma_tim2_ch2_ch4;
 
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
+DMA_HandleTypeDef hdma_usart6_tx;
 
 SDRAM_HandleTypeDef hsdram1;
 
@@ -164,72 +165,80 @@ int main(void)
   while (1) {
 	  if(send_now == 1){
 		  if(free_shooting == 0){
-			  send_data_accumulation();
+			  send_data_accumulation_dma();
 		  } else {		// FREE SHOOTING MODE
-			  send_data_free_shooting();
+			  send_data_free_shooting_dma();
 		  }
 	  }
 
 
 	  if(process_instruction_flag == 1){
-		  switch(cmd){
-				case SET_INTEGRATION_TIME:
-					HAL_ADC_Stop_DMA(&hadc1);
-					HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_2);
-					HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_3);
-					HAL_TIM_Base_Stop(&htim2);
-					HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+		  if(cmd == RESET_DEVICE){
+				HAL_ADC_Stop_DMA(&hadc1);
+				HAL_TIM_Base_Stop(&htim2);
+				HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
 
-					uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
-
-					uint32_t t_int_recibido = (p_words[3] << 16) | p_words[2];
-
-					// Protección: Evitar tiempos absurdos (ej. 0)
-					if (t_int_recibido < 100) t_int_recibido = 100;
-					if (t_int_recibido > 7000) t_int_recibido = 7000;
-
-					calculate_times(t_int_recibido);
-
-					build_SH_table();
-					build_ICG_table();
-
-					setup_timer_icg_sh();
-
-					HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&tx_packet_buffer[2], CCD_PIXELS);
-					HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-					HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
-					HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
-					HAL_TIM_Base_Start(&htim2);
-					break;
-
-
-				case RESET_DEVICE:
-					HAL_ADC_Stop_DMA(&hadc1);
-					HAL_TIM_Base_Stop(&htim2);
-					HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-
-					NVIC_SystemReset();
-					break;
-
-				default:
-					break;
+				NVIC_SystemReset();
 		  }
 
-		  process_instruction_flag = 0;
-		  memset(rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
+		  else if(processing == 0){
+			  HAL_ADC_Stop_DMA(&hadc1);
+			  HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_2);
+			  HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_3);
+			  HAL_TIM_Base_Stop(&htim2);
+			  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
 
+			  switch(cmd){
+				  case SET_INTEGRATION_TIME:{
+					  uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
 
-		  //HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_cmd_buffer, MAX_SIZE_RX_BUFFER_8);
-		  //HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, SIZE_RX_BUFFER_CMD_8);
+					  uint32_t t_int_recibido = (p_words[3] << 16) | p_words[2];
+
+					  // Protección: Evitar tiempos absurdos (ej. 0)
+					  if (t_int_recibido < 100) t_int_recibido = 100;
+					  if (t_int_recibido > 7000) t_int_recibido = 7000;
+
+					  calculate_times(t_int_recibido);
+
+					  build_SH_table();
+					  build_ICG_table();
+
+					  setup_timer_icg_sh();
+
+					  break;
+				  }
+
+				  case SET_NUMBER_OF_ACCUMULATIONS:{
+					  uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
+					  uint32_t n_accum_recibido = (p_words[3] << 16) | p_words[2];
+					  number_of_accumulations = n_accum_recibido;
+					  break;
+				  }
+
+				  case FREE_SHOOTING_ENABLE:
+					  free_shooting = 1;
+
+				  default:
+						break;
+			  }
+
+			  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&tx_packet_buffer[2], CCD_PIXELS);
+			  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+			  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
+			  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
+			  HAL_TIM_Base_Start(&htim2);
+
+			  process_instruction_flag = 0;
+			  memset(rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
+
+		  }
 	  }	// END IF INSTRUCTION FLAG
-
-
-
 
 	  if(i > 10){
 		  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
 	  	  i = 0;
-  	  }
+	  }
+
 	  i++;
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
@@ -238,7 +247,6 @@ int main(void)
 
 
   }	// END WHILE
-
 
 
   /* USER CODE END 3 */
@@ -536,6 +544,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
+  /* DMA2_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 
 }
 
