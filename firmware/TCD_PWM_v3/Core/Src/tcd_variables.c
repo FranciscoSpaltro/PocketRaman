@@ -43,7 +43,7 @@ volatile uint8_t msg_received_flag = 0; 					// Bandera para avisar al main que 
 
 // TCD_SEND_DATA
 volatile uint16_t fs_frames[2][CCD_PIXELS];
-volatile uint8_t free_shooting = 0;
+volatile uint8_t free_shooting = 1;
 volatile uint8_t cap_idx = 0;
 volatile uint8_t send_idx = 0;
 volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];

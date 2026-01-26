@@ -1,19 +1,21 @@
 #include <tcd_send_data.h>
 
-
-
-// 1. CASO NO FREE-SHOOTING
-void send_data_accumulation_dma(void){
-	// Se enviaron todos los frames
+/**
+ * @brief Envía el próximo frame almacenado en SDRAM para el caso FIXED-LENGTH MODE via DMA
+ *
+ * @post Si uart_busy == 0 y hay frames disponibles, setea uart_busy = 1, modifica tx_packet_buffer e incrementa read_frame_idx; si no hay más frames disponibles, resetea send_now y uart_busy
+ */
+void send_data_fixed_length_dma(void){
+	// Verificar si se enviaron todos los frames
 	if (read_frame_idx >= frames_to_send) {
 		  send_now = 0;
 		  uart_busy = 0;
   } else if (uart_busy == 0) {
-	  // Solo trabajo si UART esta libre
+	  // Solo trabajar si UART esta libre
 	  uart_busy = 1;
 	  volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];
 
-	  // Si DMA escribió en SDRAM y SDRAM es cacheable:
+	  // [NOTA] Probar sacarlo
 	  dcache_invalidate_range((const void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
 
 	  tx_packet_buffer[0] = HEADER;
@@ -25,7 +27,7 @@ void send_data_accumulation_dma(void){
 	  for (int i = 0; i < CCD_PIXELS; i++) {
 		  uint16_t value = frame_ptr[i];
 		  tx_packet_buffer[2 + i] = value;
-		  cs ^= value;
+		  cs = checksum_fxn(cs, value);
 	  }
 
 	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
@@ -36,12 +38,18 @@ void send_data_accumulation_dma(void){
   }
 }
 
-void send_data_accumulation(void){
-	// La función se llama desde un while: mientras el número de frame de lectura sea menor que los frames a enviar...
+/**
+ * @brief Envía el próximo frame almacenado en SDRAM para el caso FIXED-LENGTH MODE de forma bloqueante.
+ * @note Utiliza UART_BUSY
+ *
+ * @post Si hay frames disponibles, modifica tx_packet_buffer, envia el frame, incrementa read_frame_idx y resetea uart_busy; si no hay más frames disponibles, resetea send_now
+ */
+void send_data_fixed_length(void){
+	// Si quedan frames por leer
 	if (read_frame_idx < frames_to_send) {
-	  volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];		// ... obtengo la dirección de memoria del comienzo del frame...
+	  volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];		// Obtener la dirección de memoria del comienzo del frame
 
-	  tx_packet_buffer[0] = HEADER;													// ... y armo el paquete
+	  tx_packet_buffer[0] = HEADER;
 	  tx_packet_buffer[1] = DATA_SENDING;
 	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
@@ -50,21 +58,27 @@ void send_data_accumulation(void){
 	  for (int i = 0; i < CCD_PIXELS; i++) {
 		  uint16_t value = frame_ptr[i];
 		  tx_packet_buffer[2 + i] = value;
-		  cs ^= value;
+		  cs = checksum_fxn(cs, value);
 	  }
 
 	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
 
-	  HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);	// Lo envio
-	  read_frame_idx++;																					// Dejo el índice correspondiente al próximo paquete sin leer
+	  HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
+	  read_frame_idx++;
 	  uart_busy = 0;
-	} else {
+	}
+	// Si no hay más frames por leer
+	else {
 		send_now = 0;
 	}
 }
 
-// 2. CASO FREE-SHOOTING
-void send_data_free_shooting_dma(void){
+/**
+ * @brief Envía el último frame almacenado en RAM para el caso CONTINUOUS-MODE via DMA
+ *
+ * @post Si hay un frame disponible y uart_busy == 0, modifica tx_packet_buffer y envia el paquete por DMA
+ */
+void send_data_continuous_dma(void){
 	// Verifico que haya un dato guardado y que UART este libre
     if(fs_data_available == 1){
         if(uart_busy == 1)
@@ -87,7 +101,7 @@ void send_data_free_shooting_dma(void){
         for (int i = 0; i < CCD_PIXELS; i++) {
             uint16_t value = fs_frames[idx][i];
             tx_packet_buffer[2 + i] = value;
-            cs ^= value;
+            cs = checksum_fxn(cs, value);
         }
 
         tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
@@ -96,6 +110,11 @@ void send_data_free_shooting_dma(void){
     }
 }
 
+/**
+ * @brief Envía el último frame almacenado en RAM para el caso CONTINUOUS-MODE de forma bloqueante
+ *
+ * @post Si hay un frame disponible y uart_busy == 0, modifica tx_packet_buffer y envia el paquete por DMA
+ */
 void send_data_free_shooting(void){
     // Verifico si hay datos listos
     if(fs_data_available == 0){
@@ -117,7 +136,7 @@ void send_data_free_shooting(void){
     for (int i = 0; i < CCD_PIXELS; i++) {
         uint16_t value = fs_frames[idx][i];
         tx_packet_buffer[2 + i] = value;
-        cs ^= value;
+        cs = checksum_fxn(cs, value);
     }
 
     tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;

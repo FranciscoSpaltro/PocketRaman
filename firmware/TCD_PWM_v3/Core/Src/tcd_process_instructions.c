@@ -1,31 +1,17 @@
 #include <tcd_process_instructions.h>
 
-
-// ADC va de 0-4095 asique valores sobre 0x0FFF son headers adecuados; 16 bits para que se alinee facil con los mensajes DMA ADC
-/** ESTRUCTURA:
-  *		- HEADER    [2 bytes]
-  *		- COMMAND   [2 bytes]
-  *		- PAYLOAD	[N bytes]
-  *		- CHECKSUM	[2 bytes]
-*/
-
 extern UART_HandleTypeDef huart6;
 
 
 /**
- * @brief Calcula la suma de verificación (checksum) para un vector de N palabras de 16 bits
+ * @brief Establece la operación del checksum
  *
- * @param[in]	vec			Puntero al vector de datos de 16 bits
- * @param[in] 	N			Número de elementos contenidos en el vector
- * @return		uint16_t	Resultado de la suma calculada (0x0000 si N es 0)
+ * @param[in]	a			Valor A
+ * @param[in] 	N			Valor B
+ * @return		uint16_t	Resultado de a ^ b
  */
-uint16_t checksum(uint16_t * vec, uint16_t N){
-	uint16_t res = 0x0000;
-
-	for(int i = 0; i < N; i++)
-		res ^= vec[i];
-
-	return res;
+uint16_t checksum_fxn(uint16_t a, uint16_t b){
+	return a ^ b;
 }
 
 
@@ -34,7 +20,7 @@ uint16_t checksum(uint16_t * vec, uint16_t N){
  *
  * @post En caso de que la trama tenga una estructura válida, pone la #process_instruction_flag en 1.
  */
-void process_instruction(void){										// ver si reseteo buffer ante error
+void process_instruction(void){
 	uint16_t * p_rx_cmd_buffer = (uint16_t *) rx_cmd_buffer;
 
 	if(!p_rx_cmd_buffer)
@@ -47,8 +33,14 @@ void process_instruction(void){										// ver si reseteo buffer ante error
 
 	cmd = p_rx_cmd_buffer[1];
 
-	if(checksum(p_rx_cmd_buffer, OVERHEAD_8/2 + 2) != 0)		// La recepción no tiene END_BUFFER
+	uint16_t cs = 0;
+	for(int i = 0; i < OVERHEAD_8/2 + 2; i++){
+		cs = checksum_fxn(cs, p_rx_cmd_buffer[i]);
+	}
+
+	if(cs != 0)
 		return;
+
 
 	process_instruction_flag = 1;
 }
