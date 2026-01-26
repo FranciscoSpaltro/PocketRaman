@@ -41,7 +41,8 @@ ax.set_xlabel("Número de Pixel")
 ax.set_title(f"Señal CCD en Tiempo Real ({CCD_PIXELS} pixeles)")
 ax.grid(True)
 plt.tight_layout()
-
+i = 0
+bias = True
 threshold = 50
 filtering = True
     
@@ -93,30 +94,42 @@ try:
             
             continue
 
-        dummy_pixels = raw_data[0:16]
-        filtro = np.abs(dummy_pixels - np.median(dummy_pixels)) <= threshold
-        dummy_pixels_clean = dummy_pixels[filtro]
+        if bias:
+            dummy_pixels = raw_data[0:16]
+            filtro = np.abs(dummy_pixels - np.median(dummy_pixels)) <= threshold
+            dummy_pixels_clean = dummy_pixels[filtro]
 
-        if len(dummy_pixels_clean) == 0:
-            dummy_pixels_clean = dummy_pixels
+            if len(dummy_pixels_clean) == 0:
+                dummy_pixels_clean = dummy_pixels
 
-        if filtering:
-            current_bias_level = np.median(dummy_pixels_clean)
+            if filtering:
+                current_bias_level = np.median(dummy_pixels_clean)
+            else:
+                current_bias_level = np.mean(dummy_pixels)
+            correction_offset = DARK_VALUE - current_bias_level
+            corrected_data = raw_data + correction_offset
+            corrected_data = np.clip(corrected_data, 0, 4095)
+
+            # 6. Graficar
+            if CONTADOR == N_FRAMES - 1:
+                line.set_ydata(corrected_data)
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+                print("Frame recibido correctamente.")
+                CONTADOR = 0
+            else:
+                CONTADOR += 1
         else:
-            current_bias_level = np.mean(dummy_pixels)
-        correction_offset = DARK_VALUE - current_bias_level
-        corrected_data = raw_data + correction_offset
-        corrected_data = np.clip(corrected_data, 0, 4095)
-
-        # 6. Graficar
-        if CONTADOR == N_FRAMES - 1:
-            line.set_ydata(corrected_data)
-            fig.canvas.draw()
-            fig.canvas.flush_events()
-            print("Frame recibido correctamente.")
-            CONTADOR = 0
-        else:
-            CONTADOR += 1
+            # 6. Graficar
+            if CONTADOR == N_FRAMES - 1:
+                line.set_ydata(raw_data)
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+                print(f"Frame {i} recibido correctamente.")
+                CONTADOR = 0
+                i += 1
+            else:
+                CONTADOR += 1
       
 
 except KeyboardInterrupt:

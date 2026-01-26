@@ -18,10 +18,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <tcd_process_instructions.h>
-#include <tcd_signals.h>
 #include <tcd_sdram_manage.h>
+#include <tcd_send_data.h>
+#include <tcd_signals.h>
 #include "tcd_callbacks.h"
-#include "tcd_free_shooting.h"
+#include "tcd_variables.h"
 //#include "functions.h"
 
 /* USER CODE END Includes */
@@ -67,9 +68,6 @@ extern volatile int real_SH_EDGES;
 extern volatile uint8_t sistema_listo_para_capturar;
 extern uint32_t TS6_tics;
 
-extern uint8_t process_instruction_flag;
-extern uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
-extern uint16_t cmd;
 
 extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
 
@@ -156,7 +154,10 @@ int main(void)
   HAL_TIM_Base_Start(&htim4);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
-  HAL_UART_Receive_DMA(&huart6, rx_cmd_buffer, SIZE_RX_BUFFER_CMD_8);
+  HAL_Delay(100);
+  is_flushing = 0;
+
+  HAL_UART_Receive_DMA(&huart6, (uint8_t*) rx_cmd_buffer, SIZE_RX_BUFFER_CMD_8);
 
   /* USER CODE END 2 */
 
@@ -229,7 +230,7 @@ int main(void)
 			  HAL_TIM_Base_Start(&htim2);
 
 			  process_instruction_flag = 0;
-			  memset(rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
+			  memset((uint8_t*) rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
 
 		  }
 	  }	// END IF INSTRUCTION FLAG

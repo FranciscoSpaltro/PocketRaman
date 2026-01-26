@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include "main.h"
-
+#include "tcd_variables.h"
 
 
 // COMANDOS
@@ -19,8 +19,7 @@
 #define COMMAND_ASK_FOR_INTEGRATION_TIME 				0x01
 
 // VALORES
-#define OVERHEAD_8 										6 											// HEADER + CMD + CHECKSUM - EN BYTES
-#define SIZE_RX_BUFFER_CMD_8 							OVERHEAD_8 + 2 * 2 							// Espacio (en bytes) para 2 palabras de PAYLOAD
+
 
 uint32_t wait_new_int_time_uart(void);
 uint16_t checksum(uint16_t * vec, uint16_t N);

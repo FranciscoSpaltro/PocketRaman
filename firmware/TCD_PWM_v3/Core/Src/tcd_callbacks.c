@@ -1,33 +1,29 @@
 #include "tcd_callbacks.h"
 
-volatile uint8_t send_now = 0;
-volatile uint16_t number_of_accumulations = 10;
-volatile uint8_t adc_busy = 0;
-volatile uint8_t uart_busy = 0;
-volatile uint8_t acq_enabled = 1;
-volatile uint8_t ready_to_read = 0;
-volatile uint8_t fs_data_available = 0;
-volatile uint8_t processing = 0;
-
+// CALLBACK DE FINAL DE CONVERSION DEL FRAME
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     if (hadc->Instance == ADC1) {
     	HAL_ADC_Stop_DMA(&hadc1);
     	adc_busy = 0;
 
-    	if(free_shooting == 0) {								// FIXED CAPTURE
-    		new_frame += CCD_PIXELS;							// Apunto a la siguiente posición de memoria libre
-    		free_frame_space--;									// Decremento el contador de frames libres
-    		saved_frames++;										// Incremento el contador de frames guardados
+    	// Si no se está en FREE-SHOOTING, se actualizan la posición del próximo frame y los contadores; en caso de haber llegado al número de acumulaciones solicitado se activa el envio por un total de saved_frames
+    	if(free_shooting == 0) {
+    		new_frame += CCD_PIXELS;
+    		free_frame_space--;
+    		saved_frames++;
 
-    		if(saved_frames == number_of_accumulations){		// Una vez que guardé el último frame
-    			send_now = 1;									// activo el envío
-    			frames_to_send = saved_frames;					// por un total de saved_frames
-    			read_frame_idx = 0;								// y reseteo el índice de lectura para comenzar por el principio
+    		if(saved_frames == number_of_accumulations){
+    			send_now = 1;
+    			frames_to_send = saved_frames;
+    			read_frame_idx = 0;
     		}
-    	} else {												// FREE CAPTURE
-    		send_idx = cap_idx;									// Actualizo el índice de envío por el de que acabo de capturar
-    		cap_idx ^= 1;										// Paso el índice de captura al que quedó disponible
-    		fs_data_available = 1;									// Activo el envio
+    	}
+
+    	// Si se está en FREE-SHOOTING, se intercambian los índices de envio-captura, se da aviso del nuevo frame disponible y se activa el envio
+    	else {
+    		send_idx = cap_idx;
+    		cap_idx ^= 1;
+    		fs_data_available = 1;
     		send_now = 1;
     	}
     }
@@ -55,6 +51,8 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
 		icg_is_high ^= 1;				// Flag de flanco ascendente
 
 		if(icg_is_high == 1){
+			if(is_flushing == 1)
+				return;
 
 			if(adc_busy == 1 || uart_busy == 1)
 				return;

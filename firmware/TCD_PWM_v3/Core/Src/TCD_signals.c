@@ -1,27 +1,5 @@
 #include <tcd_signals.h>
 
-const int initial_n = 6;
-
-volatile int state = 0;
-volatile int n = initial_n;
-volatile int real_SH_EDGES = 0;
-
-volatile uint8_t sistema_listo_para_capturar = 1;
-volatile uint8_t icg_is_high = 0;
-
-const uint32_t TS0_tics = 1;
-uint32_t TS1_tics = 2;
-const uint32_t TS2_tics = 10;
-const uint32_t START_OFFSET = 10;
-uint32_t TS3_tics = 0;
-uint32_t TS4_tics = 0;
-uint32_t TS5_tics = 0;
-uint32_t TS6_tics = 0;
-
-uint32_t sh_ccr[SH_EDGES_MAX];
-uint32_t icg_ccr[ICG_EDGES];
-
-
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern ADC_HandleTypeDef hadc1;

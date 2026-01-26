@@ -10,11 +10,6 @@
 */
 
 extern UART_HandleTypeDef huart6;
-volatile uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];		// Vector para recibir comandos de la RPi
-volatile uint8_t process_instruction_flag = 0;				// Indicador de nueva instrucción válida recibida
-volatile uint16_t cmd = 0;									// Variable para separar el comando recibido
-
-volatile uint8_t msg_received_flag = 0; 					// Bandera para avisar al main que hay un mensaje para procesar
 
 
 /**
