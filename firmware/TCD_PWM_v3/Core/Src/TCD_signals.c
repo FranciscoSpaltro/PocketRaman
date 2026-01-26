@@ -9,10 +9,11 @@ volatile int real_SH_EDGES = 0;
 volatile uint8_t sistema_listo_para_capturar = 1;
 volatile uint8_t icg_is_high = 0;
 
-const uint32_t TS0_tics = 50;
-uint32_t TS1_tics = 122;
-const uint32_t TS2_tics = 500;
-uint32_t TS3_tics = 0;	// valores por default para 1 ms
+const uint32_t TS0_tics = 1;
+uint32_t TS1_tics = 2;
+const uint32_t TS2_tics = 10;
+const uint32_t START_OFFSET = 10;
+uint32_t TS3_tics = 0;
 uint32_t TS4_tics = 0;
 uint32_t TS5_tics = 0;
 uint32_t TS6_tics = 0;
@@ -20,36 +21,12 @@ uint32_t TS6_tics = 0;
 uint32_t sh_ccr[SH_EDGES_MAX];
 uint32_t icg_ccr[ICG_EDGES];
 
-//volatile uint16_t adc_buffer[CCD_PIXELS];
-
 
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern ADC_HandleTypeDef hadc1;
 
-/*
-void setup_timer_icg_sh(void){
-	__HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
 
-	  __HAL_TIM_SET_COUNTER(&htim2, 0);
-
-	    // El primer flanco de ICG ocurrirá en START_OFFSET
-	    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, icg_ccr[0]);
-
-	    // El primer flanco de SH ocurrirá en START_OFFSET + TS0
-	    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, sh_ccr[0]);
-
-	  __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_UPDATE);
-	  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC2);
-	  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC3);
-
-	  // 4) Arrancar DMA apuntando a CCR2
-	  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
-	  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
-
-	  __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_CC3);
-}
-*/
 void setup_timer_icg_sh(void){
     // 1. Periodo y Reset Contador
     __HAL_TIM_SET_AUTORELOAD(&htim2, sh_ccr[real_SH_EDGES-1] + TS6_tics);
@@ -104,29 +81,37 @@ void setup_timer_icg_sh(void){
 }
 
 void calculate_times(uint32_t t_int_us){
-	uint32_t fM_period = 44 + 1; // 45 ticks
+	//uint32_t fM_period = 44 + 1; // 45 ticks
+	uint32_t fM_period = 1;
 
 	uint32_t t_int_tics = 0;
 
 	if(t_int_us < 100)
-		t_int_tics = 100 * 90;
+		//t_int_tics = 100 * 90;
+		t_int_tics = 100 * 2;
 	else
-		t_int_tics = t_int_us * 90;					// REFACTOR: quitar dependencia clock
+		//t_int_tics = t_int_us * 90;					// REFACTOR: quitar dependencia clock
+		t_int_tics = t_int_us * 2;
 
-	TS3_tics = t_int_tics - 600;
-	TS4_tics = 100;
-	TS5_tics = t_int_tics - 100;
-	TS6_tics = TS5_tics - 50;
+	TS3_tics = t_int_tics - 12;
+	TS4_tics = 2;
+	TS5_tics = t_int_tics - 2;
+	TS6_tics = TS5_tics - 3;
+
+	uint32_t readout_time = 14800;
+	// 7.4 ms en ciclos de 500 ns
 
 	// reemplazo los 7.4 ms * 90 MHz por 74 * 9000 para no usar librerias de punto flotante
-	n = (74 * 9000 - TS0_tics - TS1_tics - TS2_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
+
+	n = (readout_time - TS0_tics - TS1_tics - TS2_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
 
 	// Reset de TS1 a un valor base seguro
-	uint32_t TS1_base = 100;
+	uint32_t TS1_base = 2;
 
 	// Cálculo de 'n' (Pulsos de limpieza)
 	uint32_t overhead = TS0_tics + TS1_base + TS2_tics + TS3_tics + TS4_tics + TS6_tics;
-	uint32_t readout_time = 74 * 9000;
+	//uint32_t readout_time = 74 * 9000;
+
 
 	if (readout_time + t_int_tics > overhead) {
 		 n = (readout_time + t_int_tics - overhead - 1) / t_int_tics;
