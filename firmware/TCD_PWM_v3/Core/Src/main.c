@@ -6,10 +6,6 @@
   ******************************************************************************
   * @attention
   *
-  * Para modificar el tiempo de integración, el programa espera recibir el comando 0x41 0x4E que ejecuta el reinicio
-  *
-  * Al iniciarse, la STM envia el comando 0x46 0x51
-  * Espera recibir 0x41 0x4E + uint32_t con el tiempo nuevo en us
   *
   ******************************************************************************
   */
