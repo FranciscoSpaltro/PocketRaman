@@ -30,7 +30,7 @@ except Exception as e:
 plt.ion()
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 zeros = np.zeros(CCD_PIXELS)
-#line, = ax.plot(zeros, ',', color='blue', markersize=2)
+#line, = ax.plot(zeros, '.', color='blue', markersize=2)
 line, = ax.plot(zeros, color='blue', markersize=2)
 ax.set_ylim(0, 4200)
 #ax.set_xlim(1000, 1010)
@@ -92,20 +92,27 @@ try:
             #break
             
             continue
+        
+        
+        pares   = raw_data[0::2]  # Indices 0, 2, 4...
+        impares = raw_data[1::2]  # Indices 1, 3, 5...
 
-        dummy_pixels = raw_data[0:16]
-        filtro = np.abs(dummy_pixels - np.median(dummy_pixels)) <= threshold
-        dummy_pixels_clean = dummy_pixels[filtro]
+        bias_par   = np.median(pares[0:9])
+        bias_impar = np.median(impares[0:9])
 
-        if len(dummy_pixels_clean) == 0:
-            dummy_pixels_clean = dummy_pixels
+        offset_par   = DARK_VALUE - bias_par
+        offset_impar = DARK_VALUE - bias_impar
 
-        if filtering:
-            current_bias_level = np.median(dummy_pixels_clean)
-        else:
-            current_bias_level = np.mean(dummy_pixels)
-        correction_offset = DARK_VALUE - current_bias_level
-        corrected_data = raw_data + correction_offset
+        # 4. Corregimos por separado
+        pares_corr   = pares + offset_par
+        impares_corr = impares + offset_impar
+
+        # 5. Reconstruimos el array final intercalando
+        corrected_data = np.empty_like(raw_data)
+        corrected_data[0::2] = pares_corr
+        corrected_data[1::2] = impares_corr
+
+        # 6. Recorte de seguridad
         corrected_data = np.clip(corrected_data, 0, 4095)
 
         # 6. Graficar
