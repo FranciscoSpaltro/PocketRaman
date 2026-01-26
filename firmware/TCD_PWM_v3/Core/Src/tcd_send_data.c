@@ -6,36 +6,37 @@
  * @post Si uart_busy == 0 y hay frames disponibles, setea uart_busy = 1, modifica tx_packet_buffer e incrementa read_frame_idx; si no hay más frames disponibles, resetea send_now y uart_busy
  */
 void send_data_fixed_length_dma(void){
-	// Verificar si se enviaron todos los frames
-	if (read_frame_idx >= frames_to_send) {
-		  send_now = 0;
-		  uart_busy = 0;
-  } else if (uart_busy == 0) {
-	  // Solo trabajar si UART esta libre
-	  uart_busy = 1;
-	  volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];
+	if (uart_busy == 1) {
+		return;
+	}
 
-	  // [NOTA] Probar sacarlo
-	  dcache_invalidate_range((const void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
+	if(read_frame_idx < frames_to_send){
+		volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];
 
-	  tx_packet_buffer[0] = HEADER;
-	  tx_packet_buffer[1] = DATA_SENDING;
-	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
+		// [NOTA] Probar sacarlo
+		dcache_invalidate_range((const void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
 
-	  uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+		tx_packet_buffer[0] = HEADER;
+		tx_packet_buffer[1] = DATA_SENDING;
+		tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
-	  for (int i = 0; i < CCD_PIXELS; i++) {
+		uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+
+		for (int i = 0; i < CCD_PIXELS; i++) {
 		  uint16_t value = frame_ptr[i];
 		  tx_packet_buffer[2 + i] = value;
 		  cs = checksum_fxn(cs, value);
-	  }
+		}
 
-	  tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+		tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
 
-	  HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
+		HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
+		uart_busy = 1;
 
-	  read_frame_idx++;
-  }
+		read_frame_idx++;
+	} else {
+		send_now = 0;
+	}
 }
 
 /**
@@ -45,7 +46,7 @@ void send_data_fixed_length_dma(void){
  * @post Si hay frames disponibles, modifica tx_packet_buffer, envia el frame, incrementa read_frame_idx y resetea uart_busy; si no hay más frames disponibles, resetea send_now
  */
 void send_data_fixed_length(void){
-	// Si quedan frames por leer
+	// No hace falta verificar TX COMPLETE
 	if (read_frame_idx < frames_to_send) {
 	  volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];		// Obtener la dirección de memoria del comienzo del frame
 
@@ -65,9 +66,7 @@ void send_data_fixed_length(void){
 
 	  HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
 	  read_frame_idx++;
-	  uart_busy = 0;
 	}
-	// Si no hay más frames por leer
 	else {
 		send_now = 0;
 	}
@@ -79,35 +78,32 @@ void send_data_fixed_length(void){
  * @post Si hay un frame disponible y uart_busy == 0, modifica tx_packet_buffer y envia el paquete por DMA
  */
 void send_data_continuous_dma(void){
-	// Verifico que haya un dato guardado y que UART este libre
-    if(fs_data_available == 1){
-        if(uart_busy == 1)
-            return;
+	if(uart_busy == 1)
+		return;
 
-        fs_data_available = 0;
-        uart_busy = 1;
+	send_now = 0;
 
-        // Obtengo el frame a partir del índice de envio de datos
-        uint16_t *frame_ptr = (uint16_t*)fs_frames[send_idx];
-        dcache_invalidate_range((void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
+	// Obtengo el frame a partir del índice de envio de datos
+	uint16_t *frame_ptr = (uint16_t*)fs_frames[send_idx];
+	dcache_invalidate_range((void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
 
-        tx_packet_buffer[0] = HEADER;
-        tx_packet_buffer[1] = DATA_SENDING;
-        tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
+	tx_packet_buffer[0] = HEADER;
+	tx_packet_buffer[1] = DATA_SENDING;
+	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
-        uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
-        uint8_t idx = send_idx;
+	uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
+	uint8_t idx = send_idx;
 
-        for (int i = 0; i < CCD_PIXELS; i++) {
-            uint16_t value = fs_frames[idx][i];
-            tx_packet_buffer[2 + i] = value;
-            cs = checksum_fxn(cs, value);
-        }
+	for (int i = 0; i < CCD_PIXELS; i++) {
+		uint16_t value = fs_frames[idx][i];
+		tx_packet_buffer[2 + i] = value;
+		cs = checksum_fxn(cs, value);
+	}
 
-        tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
 
-        HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
-    }
+	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
+	uart_busy = 1;
 }
 
 /**
@@ -115,14 +111,8 @@ void send_data_continuous_dma(void){
  *
  * @post Si hay un frame disponible y uart_busy == 0, modifica tx_packet_buffer y envia el paquete por DMA
  */
-void send_data_free_shooting(void){
-    // Verifico si hay datos listos
-    if(fs_data_available == 0){
-        return;
-    }
-
-    // Ocupo UART para que TIM no inicie otra lectura
-    uart_busy = 1;
+void send_data_continuous(void){
+	send_now = 0;
 
     tx_packet_buffer[0] = HEADER;
     tx_packet_buffer[1] = DATA_SENDING;
@@ -144,7 +134,5 @@ void send_data_free_shooting(void){
     // Transmisión Bloqueante (~160ms a 460800 baudios)
     HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
 
-
-    fs_data_available = 0;
-    uart_busy = 0;
+    adc_semaphore = 1;
 }

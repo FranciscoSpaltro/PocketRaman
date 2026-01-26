@@ -115,7 +115,7 @@ try:
                 line.set_ydata(corrected_data)
                 fig.canvas.draw()
                 fig.canvas.flush_events()
-                print("Frame recibido correctamente.")
+                print(f"Frame {i} recibido correctamente.")
                 CONTADOR = 0
             else:
                 CONTADOR += 1
@@ -127,10 +127,10 @@ try:
                 fig.canvas.flush_events()
                 print(f"Frame {i} recibido correctamente.")
                 CONTADOR = 0
-                i += 1
             else:
                 CONTADOR += 1
       
+        i += 1
 
 except KeyboardInterrupt:
     print("\nCerrando...")

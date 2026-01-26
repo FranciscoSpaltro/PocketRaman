@@ -13,13 +13,28 @@
 #define OVERHEAD_8 										6 											// HEADER + CMD + CHECKSUM - EN BYTES
 #define SIZE_RX_BUFFER_CMD_8 							OVERHEAD_8 + 2 * 2 							// Espacio (en bytes) para 2 palabras de PAYLOAD
 
-extern uint8_t is_flushing;
+// COMANDOS
+#define HEADER_SIZE_8 									2											// EN BYTES - debe ser múltiplo de 2
+#define HEADER 											0x7346
+#define END_BUFFER										0x7347
+#define SET_INTEGRATION_TIME 							0xF001
+#define RESET_DEVICE 									0xF002
+#define DATA_SENDING									0xF003
+#define SET_NUMBER_OF_ACCUMULATIONS						0xF004
+#define CONTINUOUS_MODE_ENABLE							0xF005
+
+#define COMMAND_ASK_FOR_INTEGRATION_TIME 				0x01
+
+
+// Variables
+extern volatile uint8_t adc_semaphore;
+extern volatile uint8_t is_flushing;
+extern volatile uint8_t adc_busy;
+extern volatile uint8_t uart_busy;
 
 // TCD_CALLBACKS
 extern volatile uint8_t send_now;
 extern volatile uint16_t number_of_accumulations;
-extern volatile uint8_t adc_busy;
-extern volatile uint8_t uart_busy;
 extern volatile uint8_t acq_enabled;
 extern volatile uint8_t ready_to_read;
 extern volatile uint8_t fs_data_available;
@@ -51,7 +66,7 @@ extern volatile uint8_t msg_received_flag; 					// Bandera para avisar al main q
 
 // TCD_SEND_DATA
 extern volatile uint16_t fs_frames[2][CCD_PIXELS];
-extern volatile uint8_t free_shooting;
+extern volatile uint8_t continuous_mode;
 extern volatile uint8_t cap_idx;
 extern volatile uint8_t send_idx;
 extern volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];

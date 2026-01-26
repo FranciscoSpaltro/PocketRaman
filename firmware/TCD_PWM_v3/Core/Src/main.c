@@ -165,10 +165,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1) {
 	  if(send_now == 1){
-		  if(free_shooting == 0){
-			  send_data_accumulation_dma();
-		  } else {		// FREE SHOOTING MODE
-			  send_data_free_shooting_dma();
+		  if(continuous_mode == 1){
+			  send_data_continuous_dma();
+		  } else {
+			  send_data_fixed_length_dma();
 		  }
 	  }
 
@@ -213,17 +213,24 @@ int main(void)
 					  uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
 					  uint32_t n_accum_recibido = (p_words[3] << 16) | p_words[2];
 					  number_of_accumulations = n_accum_recibido;
+					  continuous_mode = 0;
 					  break;
 				  }
 
-				  case FREE_SHOOTING_ENABLE:
-					  free_shooting = 1;
+				  case CONTINUOUS_MODE_ENABLE:
+					  continuous_mode = 1;
 
 				  default:
 						break;
 			  }
 
-			  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&tx_packet_buffer[2], CCD_PIXELS);
+			  saved_frames = 0;
+			  read_frame_idx = 0;
+			  free_frame_space = 2000;
+			  new_frame = (uint16_t *) SDRAM_BANK_ADDR;
+			  read_frame = (uint16_t *) SDRAM_BANK_ADDR;
+			  adc_semaphore = 1;
+
 			  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
 			  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
 			  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);

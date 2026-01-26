@@ -7,9 +7,9 @@
 #include <tcd_sdram_manage.h>
 #include "tcd_variables.h"
 
-void send_data_accumulation(void);
-void send_data_free_shooting(void);
-void send_data_accumulation_dma(void);
-void send_data_free_shooting_dma(void);
+void send_data_fixed_length(void);
+void send_data_continuous(void);
+void send_data_fixed_length_dma(void);
+void send_data_continuous_dma(void);
 
 #endif

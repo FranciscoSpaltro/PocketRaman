@@ -67,11 +67,10 @@ void calculate_times(uint32_t t_int_us){
 
     // 3. Definición de constantes para el readout
     uint32_t readout_time = 14800; // 7.4 ms expresados en ciclos de 500ns
-    uint32_t TS1_base = 2;         // Valor fijo y estable para TS1
 
     // 4. Cálculo de 'n' (Número de pulsos de limpieza durante el readout)
-    // Calculamos cuánto tiempo fijo ("overhead") gastamos por cada ciclo
-    uint32_t overhead = TS0_tics + TS1_base + TS2_tics + TS3_tics + TS4_tics + TS6_tics;
+    // Calculo cuánto tiempo fijo ("overhead") gastamos por cada ciclo
+    uint32_t overhead = TS0_tics + TS1_tics + TS2_tics + TS3_tics + TS4_tics + TS6_tics;
 
     if (readout_time + t_int_tics > overhead) {
          // Fórmula para rellenar el tiempo muerto con pulsos extra
@@ -80,12 +79,9 @@ void calculate_times(uint32_t t_int_us){
          n = 0;
     }
 
-    // --- SIN PADDING (Sincronización por Hardware) ---
 
-    // Ya no calculamos restos ni módulos. El timer esclavo va clavado al maestro.
-    TS1_tics = TS1_base;
 
-    // Actualizamos la variable global para que el DMA sepa cuántos datos mandar
+    // Actualizo la variable global para que el DMA sepa cuántos datos mandar
     real_SH_EDGES = 4 + 2 * n;
 }
 
