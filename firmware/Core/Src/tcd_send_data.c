@@ -1,5 +1,11 @@
 #include <tcd_send_data.h>
 
+volatile uint16_t fs_frames[2][CCD_PIXELS];
+volatile uint8_t continuous_mode = 1;
+volatile uint8_t cap_idx = 0;
+volatile uint8_t send_idx = 0;
+volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
+
 /**
  * @brief Envía el próximo frame almacenado en SDRAM para el caso FIXED-LENGTH MODE via DMA
  *

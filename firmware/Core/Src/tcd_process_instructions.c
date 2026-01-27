@@ -2,12 +2,16 @@
 
 extern UART_HandleTypeDef huart6;
 
+volatile uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];		// Vector para recibir comandos de la RPi
+volatile uint8_t process_instruction_flag = 0;				// Indicador de nueva instrucción válida recibida
+volatile uint16_t cmd = 0;									// Variable para separar el comando recibido
+volatile uint8_t msg_received_flag = 0; 					// Bandera para avisar al main que hay un mensaje para procesar
 
 /**
  * @brief Establece la operación del checksum
  *
  * @param[in]	a			Valor A
- * @param[in] 	N			Valor B
+ * @param[in] 	b			Valor B
  * @return		uint16_t	Resultado de a ^ b
  */
 uint16_t checksum_fxn(uint16_t a, uint16_t b){
@@ -43,4 +47,21 @@ void process_instruction(void){
 
 
 	process_instruction_flag = 1;
+}
+
+/**
+ * @brief Reinicia los parámetros luego de procesar una instrucción
+ *
+ * @post saved_frames, read_frames_idx = 0, free_frame_space = 2000, new_frame
+ * y read_frame apuntan a SDRAM_BANK_ADDR, adc_semaphore activado, process_instruction_flag en cero y rx_cmd_buffer limpio
+ */
+void reset_parameters(void){
+	saved_frames = 0;
+	read_frame_idx = 0;
+	free_frame_space = 2000; //[REVISAR]
+	new_frame = (uint16_t *) SDRAM_BANK_ADDR;
+	read_frame = (uint16_t *) SDRAM_BANK_ADDR;
+	adc_semaphore = 1;
+	process_instruction_flag = 0;
+	memset((uint8_t*) rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
 }

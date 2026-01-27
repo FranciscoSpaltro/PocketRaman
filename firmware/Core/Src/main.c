@@ -23,7 +23,6 @@
 #include <tcd_signals.h>
 #include "tcd_callbacks.h"
 #include "tcd_variables.h"
-//#include "functions.h"
 
 /* USER CODE END Includes */
 
@@ -60,18 +59,14 @@ DMA_HandleTypeDef hdma_usart6_tx;
 SDRAM_HandleTypeDef hsdram1;
 
 /* USER CODE BEGIN PV */
-
-//extern uint16_t adc_buffer[CCD_PIXELS];
-extern uint32_t sh_ccr[SH_EDGES_MAX];
-extern uint32_t icg_ccr[ICG_EDGES];
-extern volatile int real_SH_EDGES;
-extern volatile uint8_t sistema_listo_para_capturar;
-extern uint32_t TS6_tics;
-
-
-extern volatile uint8_t msg_received_flag; 	// Bandera para avisar al main
-
-
+extern volatile uint8_t is_flushing;
+extern volatile uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];
+extern volatile uint8_t send_now;
+extern volatile uint8_t continuous_mode;
+extern volatile uint8_t process_instruction_flag;
+extern volatile uint16_t cmd;
+extern volatile uint16_t number_of_accumulations;
+extern volatile uint8_t processing;
 
 /* USER CODE END PV */
 
@@ -134,25 +129,15 @@ int main(void)
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
 
-  //uint32_t t_int_inicial = wait_new_int_time_uart();
   int i = 0;
 
-  uint32_t t_int_inicial = 10;
-  if (t_int_inicial  < 100) t_int_inicial  = 100;
-  if (t_int_inicial  > 7000) t_int_inicial = 7000;
+  uint32_t t_int_inicial = 100;
   calculate_times(t_int_inicial);
 
   build_SH_table();
-  build_ICG_table();
 
   setup_timer_icg_sh();
-
-  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
-  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
-  HAL_TIM_Base_Start(&htim2);
-  HAL_TIM_OC_Start(&htim4, TIM_CHANNEL_4);
-  HAL_TIM_Base_Start(&htim4);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  start_timers(1);
 
   HAL_Delay(100);
   is_flushing = 0;
@@ -175,19 +160,13 @@ int main(void)
 
 	  if(process_instruction_flag == 1){
 		  if(cmd == RESET_DEVICE){
-				HAL_ADC_Stop_DMA(&hadc1);
-				HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-				HAL_TIM_Base_Stop(&htim2);
+				start_timers(0);
 
 				NVIC_SystemReset();
 		  }
 
 		  else if(processing == 0){
-			  HAL_ADC_Stop_DMA(&hadc1);
-			  HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_2);
-			  HAL_TIM_OC_Stop_DMA(&htim2, TIM_CHANNEL_3);
-			  HAL_TIM_Base_Stop(&htim2);
-			  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+			  start_timers(0);
 
 			  switch(cmd){
 				  case SET_INTEGRATION_TIME:{
@@ -195,14 +174,9 @@ int main(void)
 
 					  uint32_t t_int_recibido = (p_words[3] << 16) | p_words[2];
 
-					  // Protección: Evitar tiempos absurdos (ej. 0)
-					  if (t_int_recibido < 100) t_int_recibido = 100;
-					  if (t_int_recibido > 7000) t_int_recibido = 7000;
-
 					  calculate_times(t_int_recibido);
 
 					  build_SH_table();
-					  build_ICG_table();
 
 					  setup_timer_icg_sh();
 
@@ -224,20 +198,9 @@ int main(void)
 						break;
 			  }
 
-			  saved_frames = 0;
-			  read_frame_idx = 0;
-			  free_frame_space = 2000;
-			  new_frame = (uint16_t *) SDRAM_BANK_ADDR;
-			  read_frame = (uint16_t *) SDRAM_BANK_ADDR;
-			  adc_semaphore = 1;
+			  reset_parameters();
 
-			  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
-			  HAL_TIM_OC_Start_DMA(&htim2, TIM_CHANNEL_3, (uint32_t*)icg_ccr, ICG_EDGES);
-			  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-			  HAL_TIM_Base_Start(&htim2);
-
-			  process_instruction_flag = 0;
-			  memset((uint8_t*) rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
+			  start_timers(1);
 
 		  }
 	  }	// END IF INSTRUCTION FLAG
