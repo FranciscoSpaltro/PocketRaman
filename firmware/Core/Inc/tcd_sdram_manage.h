@@ -12,14 +12,17 @@
 #ifndef TCD_SDRAM_MANAGE_H
 #define TCD_SDRAM_MANAGEH
 
+#include "main.h"
+#include "cachel1_armv7.h"														// Para SCB_InvalidateDCache_by_Addr()
+#include "tcd_variables.h"
+
+
 #define SDRAM_BANK_ADDR                 ((uint32_t)0xC0000000)					// FMC mapea la SDRAM en el espacio de memoria del Cortex-M, a partir de 0xC0000000 hasta 0xC0000000 + 16 MB es vista como RAM comun
-
 #define SDRAM_MEMORY_WIDTH               FMC_SDRAM_MEM_BUS_WIDTH_32				// Describe cómo está cableado el chip (32 bits)
-
 #define SDCLOCK_PERIOD                   FMC_SDRAM_CLOCK_PERIOD_2				// FMC genera el clock de SDRAM como clock base/2 (otro es /3). Cuanto más rápido, más estrés y CAS mayor
+#define SDRAM_TIMEOUT   		  		((uint32_t)0xFFFF)
 
-
-#define SDRAM_TIMEOUT     ((uint32_t)0xFFFF)
+#define MAX_SDRAM_SPACE					2000									// // 128 Mbit = 16 MB de SDRAM; cada frame es 3694*2 bytes=7388 bytes -> entran 2269 frames
 
 // Abrir una fila en SDRAM es caro en tiempo pero leer muchas columnas seguidas de esa fila es barato. El burst length describe cuántas palabras seguidas entrega la SDRAM automáticamente
 #define SDRAM_MODEREG_BURST_LENGTH_1             ((uint16_t)0x0000)				// Cuantas palabras seguidas entrega por acceso [para accesos aleatorios, 1 es simple. Para streaming, >1 mejora el rendimiento] [REVISAR]
@@ -34,11 +37,6 @@
 //#define SDRAM_MODEREG_WRITEBURST_MODE_PROGRAMMED ((uint16_t)0x0000)			// Los writes respetan el Burst Length programado
 #define SDRAM_MODEREG_WRITEBURST_MODE_SINGLE     ((uint16_t)0x0200)				// Aunque el burst length sea 4 u 8, los WRITE se hacen de a una palabra
 
-
-
-#include "main.h"
-#include "cachel1_armv7.h"														// Para SCB_InvalidateDCache_by_Addr()
-#include "tcd_variables.h"
 
 void SDRAM_Initialization_Sequence(SDRAM_HandleTypeDef *hsdram);
 void dcache_invalidate_range(const void *addr, size_t len);

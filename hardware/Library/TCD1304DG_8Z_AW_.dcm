@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP TCD1304DG_8Z,AW_
+D Image Sensors & Color Sensors CCD Linear Sensor 3648 8x20 54mm
+K
+F https://datasheet.datasheetarchive.com/originals/distributors/DKDS-29/569259.pdf
+$ENDCMP
+#
+#End Doc Library

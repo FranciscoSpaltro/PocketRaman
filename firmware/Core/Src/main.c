@@ -131,8 +131,7 @@ int main(void)
 
   int i = 0;
 
-  uint32_t t_int_inicial = 100;
-  calculate_times(t_int_inicial);
+  calculate_times(T_INT_DEFAULT);
 
   build_SH_table();
 

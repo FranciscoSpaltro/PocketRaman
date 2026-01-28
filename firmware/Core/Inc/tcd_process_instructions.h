@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "main.h"
 #include "tcd_variables.h"
+#include "tcd_sdram_manage.h"
 #include "string.h"
 
 extern volatile uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];

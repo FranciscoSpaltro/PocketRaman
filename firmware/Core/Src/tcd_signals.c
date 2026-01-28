@@ -89,8 +89,8 @@ void calculate_times(uint32_t t_int_us){
 
     if(t_int_us < T_INT_MIN_US)
         t_int_tics = T_INT_MIN_US * tics_por_microsegundo;
-    else if(t_int_us > T_INT_MAX_US)
-    	t_int_tics = T_INT_MAX_US * tics_por_microsegundo;
+    /*else if(t_int_us > T_INT_MAX_US)
+    	t_int_tics = T_INT_MAX_US * tics_por_microsegundo;*/
     else
         t_int_tics = t_int_us * tics_por_microsegundo;
 

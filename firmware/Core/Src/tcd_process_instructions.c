@@ -58,7 +58,7 @@ void process_instruction(void){
 void reset_parameters(void){
 	saved_frames = 0;
 	read_frame_idx = 0;
-	free_frame_space = 2000; //[REVISAR]
+	free_frame_space = MAX_SDRAM_SPACE;
 	new_frame = (uint16_t *) SDRAM_BANK_ADDR;
 	read_frame = (uint16_t *) SDRAM_BANK_ADDR;
 	adc_semaphore = 1;

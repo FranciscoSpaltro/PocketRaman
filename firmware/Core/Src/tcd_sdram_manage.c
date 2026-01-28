@@ -3,7 +3,7 @@
 volatile uint16_t * new_frame = (uint16_t *) SDRAM_BANK_ADDR;
 volatile uint16_t * read_frame = (uint16_t *) SDRAM_BANK_ADDR;
 volatile size_t read_frame_idx = 0;
-volatile size_t free_frame_space = 2000;							// 128 Mbit = 16 MB de SDRAM; cada frame es 3694*2 bytes=7388 bytes -> entran 2269 frames
+volatile size_t free_frame_space = MAX_SDRAM_SPACE;
 volatile size_t saved_frames = 0;
 volatile size_t frames_to_send = 0;
 

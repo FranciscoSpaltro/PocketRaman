@@ -22,6 +22,7 @@
 #define COMMAND_ASK_FOR_INTEGRATION_TIME 				0x01
 
 #define T_INT_MIN_US									10
-#define T_INT_MAX_US									7000
+//#define T_INT_MAX_US									7000
 
+#define T_INT_DEFAULT									100
 #endif
