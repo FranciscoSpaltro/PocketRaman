@@ -9,7 +9,7 @@ TIMEOUT = 2
 HEADER_VAL = 0x7346             # "sF" en ASCII (Little Endian: 0x46, 0x73)
 COMMAND_SET_INT = 0xF001        # Comando de set integration time
 PAYLOAD_SIZE_WORDS = 2          # 2 palabras de 16 bits = 1 uint32_t
-PAYLOAD = 100                    # Tiempo de integración en microsegundos
+PAYLOAD = 5000                    # Tiempo de integración en microsegundos
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=TIMEOUT)
