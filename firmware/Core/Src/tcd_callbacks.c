@@ -36,8 +36,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     		send_idx = cap_idx;
 			cap_idx ^= 1;
 			send_now = 1;
-    	}
-    	else {
+    	} else if(continuous_mode == 0){
     		new_frame += CCD_PIXELS;
 			free_frame_space--;
 			saved_frames++;
@@ -87,7 +86,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
 
 			if(continuous_mode == 1) {
 			    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)fs_frames[cap_idx], CCD_PIXELS);
-			} else {
+			} else if(continuous_mode == 0){
 			    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)new_frame, CCD_PIXELS);
 			}
 

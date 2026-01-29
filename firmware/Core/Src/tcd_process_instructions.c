@@ -63,5 +63,7 @@ void reset_parameters(void){
 	read_frame = (uint16_t *) SDRAM_BANK_ADDR;
 	adc_semaphore = 1;
 	process_instruction_flag = 0;
+	send_now = 0;
+	is_flushing = 1;
 	memset((uint8_t*) rx_cmd_buffer, 0, SIZE_RX_BUFFER_CMD_8);
 }

@@ -151,7 +151,7 @@ int main(void)
 	  if(send_now == 1){
 		  if(continuous_mode == 1){
 			  send_data_continuous_dma();
-		  } else {
+		  } else if (continuous_mode == 0){
 			  send_data_fixed_length_dma();
 		  }
 	  }
@@ -164,21 +164,16 @@ int main(void)
 				NVIC_SystemReset();
 		  }
 
-		  else if(processing == 0){
+		  else{
 			  start_timers(0);
 
 			  switch(cmd){
 				  case SET_INTEGRATION_TIME:{
 					  uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
-
 					  uint32_t t_int_recibido = (p_words[3] << 16) | p_words[2];
-
 					  calculate_times(t_int_recibido);
-
 					  build_SH_table();
-
-					  setup_timer_icg_sh();
-
+					  continuous_mode = -1;
 					  break;
 				  }
 
@@ -186,23 +181,38 @@ int main(void)
 					  uint16_t *p_words = (uint16_t*)rx_cmd_buffer;
 					  uint32_t n_accum_recibido = (p_words[3] << 16) | p_words[2];
 					  number_of_accumulations = n_accum_recibido;
+					  continuous_mode = -1;
+					  break;
+				  }
+
+				  case FIXED_LENGTH_MODE_ENABLE:{
 					  continuous_mode = 0;
 					  break;
 				  }
 
 				  case CONTINUOUS_MODE_ENABLE:
 					  continuous_mode = 1;
+					  break;
 
 				  default:
 						break;
 			  }
 
+
+			  setup_timer_icg_sh();
+
 			  reset_parameters();
 
 			  start_timers(1);
 
+			  HAL_Delay(50);
+			  is_flushing = 0;
 		  }
+
+		  process_instruction_flag = 0;
 	  }	// END IF INSTRUCTION FLAG
+
+
 
 	  if(i > 10){
 		  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);

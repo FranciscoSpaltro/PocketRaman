@@ -16,6 +16,8 @@ extern volatile size_t read_frame_idx;
 extern volatile uint16_t * new_frame;
 extern volatile size_t free_frame_space;
 extern volatile uint8_t adc_semaphore;
+extern volatile uint8_t send_now;
+extern volatile uint8_t is_flushing;
 
 uint16_t checksum_fxn(uint16_t a, uint16_t b);
 void process_instruction(void);

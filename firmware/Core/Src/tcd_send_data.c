@@ -34,6 +34,7 @@ void send_data_fixed_length_dma(void){
 		  cs = checksum_fxn(cs, value);
 		}
 
+		SCB_CleanDCache_by_Addr((uint32_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
 		tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
 
 		HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));

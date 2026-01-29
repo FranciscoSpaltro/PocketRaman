@@ -9,7 +9,7 @@ TIMEOUT = 2
 HEADER_VAL = 0x7346             # "sF" en ASCII (Little Endian: 0x46, 0x73)
 COMMAND_SET_INT = 0xF004        # Comando de set number of accumulations
 PAYLOAD_SIZE_WORDS = 2          # 2 palabras de 16 bits = 1 uint32_t
-PAYLOAD = 50                    # Número de acumulaciones
+PAYLOAD = 5                    # Número de acumulaciones
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=TIMEOUT)
@@ -47,6 +47,8 @@ try:
     print(f"Paquete: {paquete_final.hex().upper()}")
     ser.write(paquete_final)
 
+
 except KeyboardInterrupt:
     print("\nCerrando...")
     ser.close()
+
