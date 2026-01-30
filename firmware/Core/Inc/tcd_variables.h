@@ -20,8 +20,6 @@
 #define CONTINUOUS_MODE_ENABLE							0xF005
 #define FIXED_LENGTH_MODE_ENABLE						0xF006
 
-#define COMMAND_ASK_FOR_INTEGRATION_TIME 				0x01
-
 #define T_INT_MIN_US									10
 //#define T_INT_MAX_US									7000
 
