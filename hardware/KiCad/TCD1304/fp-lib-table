@@ -1,4 +1,0 @@
-(fp_lib_table
-  (version 7)
-  (lib (name "CustomLib")(type "KiCad")(uri "C:/Users/francisco.spaltro/OneDrive - SUPSI/Desktop/Repo/PocketRaman/hardware/Library")(options "")(descr ""))
-)

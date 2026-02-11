@@ -1,4 +1,0 @@
-(sym_lib_table
-  (version 7)
-  (lib (name "Sensors_Custom")(type "KiCad")(uri "${KIPRJMOD}/Sensors_Custom.kicad_sym")(options "")(descr ""))
-)
