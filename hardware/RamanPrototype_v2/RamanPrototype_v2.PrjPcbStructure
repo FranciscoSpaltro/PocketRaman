@@ -3,4 +3,3 @@ Record=SheetSymbol|SourceDocument=Main.SchDoc|Designator=U_Microcontroller|SchDe
 Record=SheetSymbol|SourceDocument=Main.SchDoc|Designator=U_Out|SchDesignator=U_Out|FileName=Out.SchDoc|SheetNumber=5|SymbolType=Normal|RawFileName=Out.SchDoc|DesignItemId= |SourceLibraryName= |ObjectKind=Sheet Symbol|RevisionGUID= |ItemGUID= |VaultGUID= 
 Record=SheetSymbol|SourceDocument=Main.SchDoc|Designator=U_Power|SchDesignator=U_Power|FileName=Power.SchDoc|SheetNumber=2|SymbolType=Normal|RawFileName=Power.SchDoc|DesignItemId= |SourceLibraryName= |ObjectKind=Sheet Symbol|RevisionGUID= |ItemGUID= |VaultGUID= 
 Record=SheetSymbol|SourceDocument=Main.SchDoc|Designator=U_Sensor|SchDesignator=U_Sensor|FileName=Sensor.SchDoc|SheetNumber=4|SymbolType=Normal|RawFileName=Sensor.SchDoc|DesignItemId= |SourceLibraryName= |ObjectKind=Sheet Symbol|RevisionGUID= |ItemGUID= |VaultGUID= 
-Record=NoMainPathDocument|SourceDocument=Main.SchDoc|FileName=UNUSED.SchDoc|SheetNumber=6

@@ -118,23 +118,6 @@ GenerateClassCluster=0
 DocumentUniqueId=TMKHNWPC
 
 [Document5]
-DocumentPath=PCB1.PcbDoc
-AnnotationEnabled=1
-AnnotateStartValue=1
-AnnotationIndexControlEnabled=0
-AnnotateSuffix=
-AnnotateScope=All
-AnnotateOrder=-1
-DoLibraryUpdate=1
-DoDatabaseUpdate=1
-ClassGenCCAutoEnabled=1
-ClassGenCCAutoRoomEnabled=0
-ClassGenNCAutoScope=None
-DItemRevisionGUID=
-GenerateClassCluster=0
-DocumentUniqueId=JFBYACLR
-
-[Document6]
 DocumentPath=Pines.SchLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -151,7 +134,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=OVFKSBZX
 
-[Document7]
+[Document6]
 DocumentPath=Pines.PcbLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -168,7 +151,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=MFBPIRIR
 
-[Document8]
+[Document7]
 DocumentPath=CompAct.SchLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -185,7 +168,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=CBKJSXEK
 
-[Document9]
+[Document8]
 DocumentPath=CompAct.PcbLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -202,7 +185,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=RLDBSCIW
 
-[Document10]
+[Document9]
 DocumentPath=CompPas.SchLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -219,7 +202,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=XMHSQKPI
 
-[Document11]
+[Document10]
 DocumentPath=CompPas.PcbLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -236,7 +219,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=JOCMBRBP
 
-[Document12]
+[Document11]
 DocumentPath=CI.SchLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -253,7 +236,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=YKQYJEAV
 
-[Document13]
+[Document12]
 DocumentPath=CI.PcbLib
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -270,7 +253,7 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=ONRPBENJ
 
-[Document14]
+[Document13]
 DocumentPath=Out.SchDoc
 AnnotationEnabled=1
 AnnotateStartValue=1
@@ -286,6 +269,23 @@ ClassGenNCAutoScope=None
 DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=MTATVFLX
+
+[Document14]
+DocumentPath=PCB1.PcbDoc
+AnnotationEnabled=1
+AnnotateStartValue=1
+AnnotationIndexControlEnabled=0
+AnnotateSuffix=
+AnnotateScope=All
+AnnotateOrder=-1
+DoLibraryUpdate=1
+DoDatabaseUpdate=1
+ClassGenCCAutoEnabled=1
+ClassGenCCAutoRoomEnabled=0
+ClassGenNCAutoScope=None
+DItemRevisionGUID=
+GenerateClassCluster=0
+DocumentUniqueId=AMCCXRJH
 
 [Configuration1]
 Name=Sources
@@ -1263,9 +1263,9 @@ UpdateVariants=1
 UpdateToLatestRevision=1
 PartTypes=0
 ComponentLibIdentifierKind0=Library Name And Type
-ComponentLibraryIdentifier0=CI.SchLib
-ComponentDesignItemID0=A4988SETTR-T
-ComponentSymbolReference0=A4988SETTR-T
+ComponentLibraryIdentifier0=CompAct.SchLib
+ComponentDesignItemID0=REG3_3-NCV1117ST33T3G
+ComponentSymbolReference0=REG3_3-NCV1117ST33T3G
 ComponentUpdate0=1
 ComponentIsDeviceSheet0=0
 FullReplace=1
@@ -1304,7 +1304,7 @@ ParameterUpdate9=1
 ModelTypeGroup0=PCBLIB
 ModelTypeUpdate0=1
 ModelType0=PCBLIB
-ModelName0=QFN50P500X500X90-29N
+ModelName0=SOT230P700X180-4N
 ModelUpdate0=1
 
 [DatabaseUpdateOptions]
