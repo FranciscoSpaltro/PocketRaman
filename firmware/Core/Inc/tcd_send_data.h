@@ -13,7 +13,7 @@ extern volatile size_t frames_to_send;
 extern volatile size_t free_frame_space;
 extern volatile uint16_t * read_frame;
 extern volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
-extern volatile uint16_t fs_frames[2][CCD_PIXELS];
+extern volatile uint16_t continuous_frames[2][CCD_PIXELS];
 
 
 void send_data_fixed_length(void);

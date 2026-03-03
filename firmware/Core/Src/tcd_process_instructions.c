@@ -61,7 +61,7 @@ void reset_parameters(void){
 	free_frame_space = MAX_SDRAM_SPACE;
 	new_frame = (uint16_t *) SDRAM_BANK_ADDR;
 	read_frame = (uint16_t *) SDRAM_BANK_ADDR;
-	adc_semaphore = 1;
+	can_save_continuous_frame = 1;
 	process_instruction_flag = 0;
 	send_now = 0;
 	is_flushing = 1;

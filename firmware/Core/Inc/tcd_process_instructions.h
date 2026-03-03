@@ -15,7 +15,7 @@ extern volatile uint16_t * read_frame;
 extern volatile size_t read_frame_idx;
 extern volatile uint16_t * new_frame;
 extern volatile size_t free_frame_space;
-extern volatile uint8_t adc_semaphore;
+extern volatile uint8_t can_save_continuous_frame;
 extern volatile uint8_t send_now;
 extern volatile uint8_t is_flushing;
 

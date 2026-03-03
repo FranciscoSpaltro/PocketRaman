@@ -1,6 +1,6 @@
 #include <tcd_send_data.h>
 
-volatile uint16_t fs_frames[2][CCD_PIXELS];
+volatile uint16_t continuous_frames[2][CCD_PIXELS];
 volatile uint8_t continuous_mode = 1;
 volatile uint8_t cap_idx = 0;
 volatile uint8_t send_idx = 0;
@@ -91,7 +91,7 @@ void send_data_continuous_dma(void){
 	send_now = 0;
 
 	// Obtengo el frame a partir del índice de envio de datos
-	uint16_t *frame_ptr = (uint16_t*)fs_frames[send_idx];
+	uint16_t *frame_ptr = (uint16_t*)continuous_frames[send_idx];
 	dcache_invalidate_range((void*)frame_ptr, CCD_PIXELS * sizeof(uint16_t));
 
 	tx_packet_buffer[0] = HEADER;
@@ -102,7 +102,7 @@ void send_data_continuous_dma(void){
 	uint8_t idx = send_idx;
 
 	for (int i = 0; i < CCD_PIXELS; i++) {
-		uint16_t value = fs_frames[idx][i];
+		uint16_t value = continuous_frames[idx][i];
 		tx_packet_buffer[2 + i] = value;
 		cs = checksum_fxn(cs, value);
 	}
@@ -131,7 +131,7 @@ void send_data_continuous(void){
     uint8_t idx = send_idx;
 
     for (int i = 0; i < CCD_PIXELS; i++) {
-        uint16_t value = fs_frames[idx][i];
+        uint16_t value = continuous_frames[idx][i];
         tx_packet_buffer[2 + i] = value;
         cs = checksum_fxn(cs, value);
     }
@@ -141,5 +141,5 @@ void send_data_continuous(void){
     // Transmisión Bloqueante (~160ms a 460800 baudios)
     HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
 
-    adc_semaphore = 1;
+    can_save_continuous_frame = 1;
 }
