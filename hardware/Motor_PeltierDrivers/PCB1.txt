@@ -1,0 +1,12 @@
+Board Information Report
+Filename     : C:\Users\francisco.spaltro\OneDrive - SUPSI\Desktop\PocketRaman\hardware\Motor_PeltierDrivers\PCB1.PcbDoc
+Date         : 6/3/2026
+Time         : 11:45:14
+Time Elapsed : 00:00:00
+
+Routing Information
+    Routing completion, 100,00%
+    Connections, 79
+    Connections routed, 79
+    Connections remaining, 0
+count : 4
