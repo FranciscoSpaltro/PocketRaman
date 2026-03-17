@@ -1,0 +1,35 @@
+*$
+********************************************************************************
+* ON Semiconductor Schottky Rectifier diode FSV15150V Model Library
+* Last Update: July 22, 2017
+* Model Version: 1.00
+* Simulator: Pspice 17.2
+*
+********************************************************************************
+* Model Contacts:
+*    James Victory     James.Victory@onsemi.com
+*    Jie Bai           jie.bai@onsemi.com
+*
+********************************************************************************
+* Reversion History:
+*	Vers.	Date		Brief Description
+*	1.00	07/22/2016	Model is based on datasheet
+*
+********************************************************************************
+.subckt FSV15150V 1 2 3
++ params: area=1  
+r1 1 A 1e-5
+r2 2 A 1e-5  
+d1 A 3 dsky {area}
+.model dsky d  
++ is=1.171E-06 rs=0.01926 n=1.182  
++ eg=0.7417 ikf=0.2597 
++ isr=3.179E-07 nr=1.5 
++ cjo=3.802E-09 vj=0.9 m=0.8953  
++ fc=0.5 tt=1E-09 
++ trs1=0.0237 trs2=0  
++ xti=0.2392 tikf=0.03238 
++ bv=150 ibv=0.0008 ibvl=1 
++ nbv=1 nbvl=1  
+.ends FSV15150V
+
