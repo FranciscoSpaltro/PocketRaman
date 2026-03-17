@@ -1,6 +1,7 @@
 #include "tcd_callbacks.h"
 
 extern UART_HandleTypeDef huart6;
+extern TIM_HandleTypeDef htim1;
 
 volatile uint8_t is_flushing = 1;
 volatile uint8_t can_save_continuous_frame = 1;
@@ -83,6 +84,8 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
 
 			if(adc_busy == 1)
 				return;
+
+			adc_busy = 1;
 
 			if(continuous_mode == 1) {
 			    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)continuous_frames[cap_idx], CCD_PIXELS);
