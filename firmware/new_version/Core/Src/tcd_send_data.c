@@ -141,5 +141,5 @@ void send_data_continuous(void){
     // Transmisión Bloqueante (~160ms a 460800 baudios)
     HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
 
-    can_save_continuous_frame = 1;
+    can_save_frame = 1;
 }

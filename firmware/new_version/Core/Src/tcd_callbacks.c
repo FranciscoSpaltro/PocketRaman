@@ -4,17 +4,12 @@ extern UART_HandleTypeDef huart6;
 extern TIM_HandleTypeDef htim1;
 
 volatile uint8_t is_flushing = 1;
-volatile uint8_t can_save_continuous_frame = 1;
+volatile uint8_t can_save_frame = 1;
 volatile uint8_t adc_busy = 0;
 volatile uint8_t uart_busy = 0;
 
 volatile uint8_t send_now = 0;
 volatile uint16_t number_of_accumulations = 50;
-volatile uint8_t acq_enabled = 1;
-volatile uint8_t ready_to_read = 0;
-volatile uint8_t fs_data_available = 0;
-volatile uint8_t processing = 0;
-
 volatile uint8_t icg_is_high = 0;
 
 /**
@@ -33,7 +28,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     	adc_busy = 0;
 
     	if(continuous_mode == 1){
-    		can_save_continuous_frame = 0;
+    		can_save_frame = 0;
     		send_idx = cap_idx;
 			cap_idx ^= 1;
 			send_now = 1;
@@ -43,7 +38,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 			saved_frames++;
 
 			if(saved_frames == number_of_accumulations){
-				can_save_continuous_frame = 0;
+				can_save_frame = 0;
 				send_now = 1;
 				frames_to_send = saved_frames;
 				read_frame_idx = 0;
@@ -62,7 +57,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart->Instance == USART6){
 		if(continuous_mode == 1)
-			can_save_continuous_frame = 1;
+			can_save_frame = 1;
 		uart_busy = 0;
 	}
 }
@@ -79,7 +74,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
 		icg_is_high ^= 1;				// Flag de flanco ascendente
 
 		if(icg_is_high == 1){
-			if(is_flushing == 1 || can_save_continuous_frame == 0)
+			if(is_flushing == 1 || can_save_frame == 0)
 				return;
 
 			if(adc_busy == 1)

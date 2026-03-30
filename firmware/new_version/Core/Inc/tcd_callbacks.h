@@ -10,7 +10,7 @@
 
 extern volatile uint8_t adc_busy;
 extern volatile uint8_t continuous_mode;
-extern volatile uint8_t can_save_continuous_frame;
+extern volatile uint8_t can_save_frame;
 extern volatile uint8_t send_idx;
 extern volatile uint8_t cap_idx;
 extern volatile uint8_t send_now;

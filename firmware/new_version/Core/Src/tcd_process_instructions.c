@@ -5,7 +5,6 @@ extern UART_HandleTypeDef huart6;
 volatile uint8_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_8];		// Vector para recibir comandos de la RPi
 volatile uint8_t process_instruction_flag = 0;				// Indicador de nueva instrucción válida recibida
 volatile uint16_t cmd = 0;									// Variable para separar el comando recibido
-volatile uint8_t msg_received_flag = 0; 					// Bandera para avisar al main que hay un mensaje para procesar
 
 /**
  * @brief Establece la operación del checksum
@@ -61,7 +60,7 @@ void reset_parameters(void){
 	free_frame_space = MAX_SDRAM_SPACE;
 	new_frame = (uint16_t *) SDRAM_BANK_ADDR;
 	read_frame = (uint16_t *) SDRAM_BANK_ADDR;
-	can_save_continuous_frame = 1;
+	can_save_frame = 1;
 	process_instruction_flag = 0;
 	send_now = 0;
 	is_flushing = 1;

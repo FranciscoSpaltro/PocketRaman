@@ -66,7 +66,6 @@ extern volatile uint8_t continuous_mode;
 extern volatile uint8_t process_instruction_flag;
 extern volatile uint16_t cmd;
 extern volatile uint16_t number_of_accumulations;
-extern volatile uint8_t processing;
 
 /* USER CODE END PV */
 
