@@ -40,11 +40,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 			if(saved_frames == number_of_accumulations){
 				can_save_frame = 0;
 				send_now = 1;
-				frames_to_send = saved_frames;
-				read_frame_idx = 0;
 			}
     	}
-
     }
 }
 

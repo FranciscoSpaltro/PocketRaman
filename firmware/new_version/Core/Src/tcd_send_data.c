@@ -16,7 +16,7 @@ void send_data_fixed_length_dma(void){
 		return;
 	}
 
-	if(read_frame_idx < frames_to_send){
+	if(read_frame_idx < saved_frames){
 		volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];
 
 		// [NOTA] Probar sacarlo
@@ -42,6 +42,8 @@ void send_data_fixed_length_dma(void){
 
 		read_frame_idx++;
 	} else {
+		saved_frames = 0;
+		read_frame_idx = 0;
 		send_now = 0;
 	}
 }
@@ -54,7 +56,7 @@ void send_data_fixed_length_dma(void){
  */
 void send_data_fixed_length(void){
 	// No hace falta verificar TX COMPLETE
-	if (read_frame_idx < frames_to_send) {
+	if (read_frame_idx < saved_frames) {
 	  volatile uint16_t *frame_ptr = &read_frame[read_frame_idx * CCD_PIXELS];		// Obtener la dirección de memoria del comienzo del frame
 
 	  tx_packet_buffer[0] = HEADER;
@@ -75,7 +77,9 @@ void send_data_fixed_length(void){
 	  read_frame_idx++;
 	}
 	else {
+		read_frame_idx = 0;
 		send_now = 0;
+		saved_frames = 0;
 	}
 }
 

@@ -1,7 +1,6 @@
 import argparse
 import matplotlib.pyplot as plt
 from spectrometer import SpectrometerDriver
-import time
 
 def main():
     parser = argparse.ArgumentParser(description="Controlador de Espectrómetro CCD")
