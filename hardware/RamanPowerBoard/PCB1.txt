@@ -1,7 +1,7 @@
 Board Information Report
-Filename     : C:\Users\francisco.spaltro\OneDrive - SUPSI\Desktop\PocketRaman\hardware\RamanPowerBoard\PCB1.PcbDoc
-Date         : 23/4/2026
-Time         : 10:22:05
+Filename     : C:\Users\franc\Desktop\Portfolio\PocketRaman\hardware\RamanPowerBoard\PCB1.PcbDoc
+Date         : 27/4/2026
+Time         : 10:25:07
 Time Elapsed : 00:00:00
 
 Routing Information
