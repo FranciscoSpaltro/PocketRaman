@@ -1,0 +1,87 @@
+Protel Design System Design Rule Check
+PCB File : C:\Users\francisco.spaltro\OneDrive - SUPSI\Desktop\PocketRaman\hardware\RamanPowerBoard\PCB1.PcbDoc
+Date     : 23/4/2026
+Time     : 15:04:38
+
+Processing Rule : Clearance Constraint (Gap=0.05mm) (All),(InComponent('SB4_MD1') OR InComponent('SB5_MD1') OR InComponent('SB6_MD1') OR InComponent('SB4_MD2') OR InComponent('SB5_MD2') OR InComponent('SB6_MD2'))
+Rule Violations :0
+
+Processing Rule : Clearance Constraint (Gap=0.15mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Clearance Constraint (Gap=0mm) (InComponent('SB*')),(All)
+Rule Violations :0
+
+Processing Rule : Clearance Constraint (Gap=0.1mm) (InComponent('U4')),(All)
+Rule Violations :0
+
+Processing Rule : Short-Circuit Constraint (Allowed=No) (All),(All)
+Rule Violations :0
+
+Processing Rule : Short-Circuit Constraint (Allowed=Yes) (All),(InComponent('SB*'))
+Rule Violations :0
+
+Processing Rule : Un-Routed Net Constraint ( (All) )
+Rule Violations :0
+
+Processing Rule : Modified Polygon (Allow modified: No), (Allow shelved: No)
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=0.5mm) (Max=2mm) (Preferred=1mm) (InNet('VBB'))
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=0.2mm) (Max=1mm) (Preferred=0.25mm) (All)
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=0.3mm) (Max=0.6mm) (Preferred=0.6mm) (InNetClass('Power_Class'))
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=0.15mm) (Max=0.254mm) (Preferred=0.2mm) (InComponent('SB4_MD1') OR InComponent('SB5_MD1') OR InComponent('SB6_MD1') OR InComponent('SB4_MD2') OR InComponent('SB5_MD2') OR InComponent('SB6_MD2'))
+Rule Violations :0
+
+Processing Rule : Routing Topology Rule(Topology=Shortest) (All)
+Rule Violations :0
+
+Processing Rule : Power Plane Connect Rule(Relief Connect )(Expansion=0.508mm) (Conductor Width=0.254mm) (Air Gap=0.254mm) (Entries=4) (All)
+Rule Violations :0
+
+Processing Rule : Hole Size Constraint (Min=0.025mm) (Max=3.2mm) (All)
+Rule Violations :0
+
+Processing Rule : Hole To Hole Clearance (Gap=0.254mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Minimum Solder Mask Sliver (Gap=0.254mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Minimum Solder Mask Sliver (Gap=0.1mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Silk To Solder Mask (Clearance=0.1mm) (IsPad),(All)
+   Violation between Silk To Solder Mask Clearance Constraint: (0.067mm < 0.1mm) Between Arc (18.189mm,9.45mm) on Top Overlay And Pad C36-1(17.399mm,9.525mm) on Top Layer [Top Overlay] to [Top Solder] clearance [0.067mm]
+   Violation between Silk To Solder Mask Clearance Constraint: (0.08mm < 0.1mm) Between Arc (2.524mm,28.076mm) on Top Overlay And Pad C41-1(3.264mm,27.051mm) on Top Layer [Top Overlay] to [Top Solder] clearance [0.08mm]
+Rule Violations :2
+
+Processing Rule : Silk To Solder Mask (Clearance=0.254mm) (IsPad),(All)
+Rule Violations :0
+
+Processing Rule : Silk to Silk (Clearance=0.254mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Silk to Silk (Clearance=0.1mm) (All),(All)
+   Violation between Silk To Silk Clearance Constraint: (0.027mm < 0.1mm) Between Text "TO BOARD A" (59.563mm,43.307mm) on Top Overlay And Track (58.674mm,43.18mm)(59.868mm,43.18mm) on Top Overlay Silk Text to Silk Clearance [0.027mm]
+Rule Violations :1
+
+Processing Rule : Net Antennae (Tolerance=0mm) (All)
+Rule Violations :0
+
+Processing Rule : Board Clearance Constraint (Gap=0mm) (All)
+Rule Violations :0
+
+Processing Rule : Height Constraint (Min=0mm) (Max=25.4mm) (Prefered=12.7mm) (All)
+Rule Violations :0
+
+
+Violations Detected : 3
+Waived Violations : 0
+Time Elapsed        : 00:00:01

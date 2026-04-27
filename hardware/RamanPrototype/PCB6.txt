@@ -1,0 +1,12 @@
+Board Information Report
+Filename     : C:\Users\francisco.spaltro\OneDrive - SUPSI\Desktop\PocketRaman\hardware\RamanPrototype_v2\PCB6.PcbDoc
+Date         : 21/4/2026
+Time         : 14:16:34
+Time Elapsed : 00:00:00
+
+Routing Information
+    Routing completion, 100,00%
+    Connections, 353
+    Connections routed, 353
+    Connections remaining, 0
+count : 4
