@@ -1,7 +1,7 @@
 Board Information Report
 Filename     : C:\Users\francisco.spaltro\OneDrive - SUPSI\Desktop\PocketRaman\hardware\RamanPrototype\PCB7.PcbDoc
-Date         : 29/4/2026
-Time         : 14:08:51
+Date         : 30/4/2026
+Time         : 10:23:28
 Time Elapsed : 00:00:00
 
 Routing Information

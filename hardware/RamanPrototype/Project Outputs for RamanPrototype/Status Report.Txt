@@ -1,23 +1,13 @@
-Output: Gerber Files
-Type  : Gerber
-From  : Variant [[No Variations]] of Project [RamanPrototype.PrjPcb]
-   Generated File[PCB7.GTO]
-   Generated File[PCB7.GTP]
-   Generated File[PCB7.GTS]
-   Generated File[PCB7.GTL]
-   Generated File[PCB7.GP1]
-   Generated File[PCB7.GP2]
-   Generated File[PCB7.GBL]
-   Generated File[PCB7.GBS]
-   Generated File[PCB7.GBP]
-   Generated File[PCB7.GBO]
-   Generated File[PCB7.GM1]
-   Generated File[PCB7.GM]
-   Generated File[PCB7.EXTREP]
-   Generated File[PCB7.REP]
+Output: NC Drill Files
+Type  : NC Drill
+From  : Project [RamanPrototype.PrjPcb]
+   Generated File[PCB7-RoundHoles.TXT]
+   Generated File[PCB7-SlotHoles.TXT]
+   Generated File[PCB7.LDP]
+   Generated File[PCB7.DRR]
 
 
-Files Generated   : 14
+Files Generated   : 4
 Documents Printed : 0
 
-Finished Output Generation At 11:12:48 On 28/4/2026
+Finished Output Generation At 11:32:24 On 30/4/2026

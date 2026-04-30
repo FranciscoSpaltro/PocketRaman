@@ -1,0 +1,3 @@
+Layer Pairs Export File for PCB: C:\Users\francisco.spaltro\OneDrive - SUPSI\Desktop\PocketRaman\hardware\RamanPrototype\PCB7.PcbDoc
+LayersSetName=Top_Bot_Thru_Holes|DrillFile=pcb7-roundholes.txt|DrillLayers=gtl,gp1,gp2,gbl
+LayersSetName=Top_Bot_Slot_Holes|DrillFile=pcb7-slotholes.txt|DrillLayers=gtl,gp1,gp2,gbl
