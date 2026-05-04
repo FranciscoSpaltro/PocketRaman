@@ -43,63 +43,39 @@ Used DCodes :
 *************************************************************
 
 *************************************************************
-Generating : Top Paste
-      File : PCB1.GTP
+Generating : POWER
+      File : PCB1.GP2
 
-    Adding Layer      : Top Paste
-
-    Adding Layer      : Top Layer
+    Adding Layer      : POWER
 
     Adding Layer      : Multi-Layer
 
 
 Used DCodes :
-    D15
-    D16
-    D17
-    D18
-    D19
-    D20
-    D21
-    D22
-    D23
-    D24
+    D49
+    D63
+    D64
+    D65
+    D66
+    D67
+    D68
+    D69
+    D70
+    D71
 *************************************************************
 
 *************************************************************
-Generating : Top Solder
-      File : PCB1.GTS
+Generating : Bottom Paste
+      File : PCB1.GBP
 
-    Adding Layer      : Top Solder
+    Adding Layer      : Bottom Paste
 
-    Adding Layer      : Top Layer
+    Adding Layer      : Bottom Layer
 
     Adding Layer      : Multi-Layer
 
 
 Used DCodes :
-    D15
-    D16
-    D25
-    D26
-    D27
-    D28
-    D29
-    D30
-    D31
-    D32
-    D33
-    D34
-    D35
-    D36
-    D37
-    D38
-    D39
-    D40
-    D41
-    D42
-    D43
-    D44
 *************************************************************
 
 *************************************************************
@@ -126,32 +102,34 @@ Used DCodes :
 *************************************************************
 
 *************************************************************
-Generating : GROUND
-      File : PCB1.GP1
+Generating : Top Paste
+      File : PCB1.GTP
 
-    Adding Layer      : GROUND
+    Adding Layer      : Top Paste
+
+    Adding Layer      : Top Layer
 
     Adding Layer      : Multi-Layer
 
 
 Used DCodes :
-    D49
-    D63
-    D64
-    D65
-    D66
-    D67
-    D68
-    D69
-    D70
-    D71
+    D15
+    D16
+    D17
+    D18
+    D19
+    D20
+    D21
+    D22
+    D23
+    D24
 *************************************************************
 
 *************************************************************
-Generating : POWER
-      File : PCB1.GP2
+Generating : GROUND
+      File : PCB1.GP1
 
-    Adding Layer      : POWER
+    Adding Layer      : GROUND
 
     Adding Layer      : Multi-Layer
 
@@ -196,20 +174,6 @@ Used DCodes :
 *************************************************************
 
 *************************************************************
-Generating : Bottom Paste
-      File : PCB1.GBP
-
-    Adding Layer      : Bottom Paste
-
-    Adding Layer      : Bottom Layer
-
-    Adding Layer      : Multi-Layer
-
-
-Used DCodes :
-*************************************************************
-
-*************************************************************
 Generating : Bottom Overlay
       File : PCB1.GBO
 
@@ -217,6 +181,42 @@ Generating : Bottom Overlay
 
 
 Used DCodes :
+*************************************************************
+
+*************************************************************
+Generating : Top Solder
+      File : PCB1.GTS
+
+    Adding Layer      : Top Solder
+
+    Adding Layer      : Top Layer
+
+    Adding Layer      : Multi-Layer
+
+
+Used DCodes :
+    D15
+    D16
+    D25
+    D26
+    D27
+    D28
+    D29
+    D30
+    D31
+    D32
+    D33
+    D34
+    D35
+    D36
+    D37
+    D38
+    D39
+    D40
+    D41
+    D42
+    D43
+    D44
 *************************************************************
 
 *************************************************************
