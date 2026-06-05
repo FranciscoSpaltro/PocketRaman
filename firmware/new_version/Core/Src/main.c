@@ -214,7 +214,7 @@ int main(void)
 
 
 	  if(i > 10){
-		  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+		  HAL_GPIO_TogglePin(LED1_GPIO_Port, GPIO_PIN_7);
 	  	  i = 0;
 	  }
 
