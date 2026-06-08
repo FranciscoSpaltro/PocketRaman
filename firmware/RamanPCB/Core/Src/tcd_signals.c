@@ -1,7 +1,18 @@
-#include "funciones.h"
+#include <tcd_signals.h>
+#include <tcd_variables.h>
 
+extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim5;
+extern ADC_HandleTypeDef hadc1;
+extern volatile uint8_t uart_busy;
+extern volatile uint8_t send_now;
+extern volatile uint8_t is_flushing;
+
+volatile uint8_t adc_busy = 0;
+volatile uint8_t can_save = 1;
+
+volatile uint16_t continuous_frames[CCD_PIXELS];
 
 volatile int n = 0;
 volatile int real_SH_EDGES = 0;
@@ -117,6 +128,10 @@ void build_SH_table(void)
  */
 void start_timers(uint8_t start){
 	if(start == 1){
+
+		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+		HAL_TIM_Base_Start(&htim1);
+
 		__HAL_TIM_SET_AUTORELOAD(&htim5, sh_ccr[real_SH_EDGES-1] + TS6_tics);
 		__HAL_TIM_SET_COUNTER(&htim5, 0);
 		TIM_OC_InitTypeDef sConfigOC = {0};
@@ -130,16 +145,53 @@ void start_timers(uint8_t start){
 		__HAL_TIM_ENABLE_DMA(&htim5, TIM_DMA_CC2);
 
 		HAL_TIM_OC_Start_DMA(&htim5, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
+		//HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
+		HAL_TIM_OC_Start_IT(&htim5, TIM_CHANNEL_4);
 		HAL_TIM_Base_Start(&htim5);
-		HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
 
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 	} else if(start == 0){
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-
+		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
 		HAL_TIM_OC_Stop_DMA(&htim5, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Stop(&htim5, TIM_CHANNEL_4);
 		HAL_TIM_Base_Stop(&htim5);
 	}
 
+}
+
+
+/**
+ * @brief  Callback del Timer (Output Compare).
+ * Sincroniza el inicio del ADC con la señal ICG (Integration Clear Gate) del CCD.
+ *
+ * @post	Si los recursos estaban permitidos, se activó el DMA-ADC
+ */
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
+	if(htim->Instance == TIM5 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_4){
+		//if(is_flushing == 1)
+			//return;
+
+		if(adc_busy == 1 || can_save == 0)
+			return;
+
+		adc_busy = 1;
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)continuous_frames, CCD_PIXELS);
+	}
+}
+
+/**
+ * @brief  Callback de finalización de conversión ADC (DMA).
+ * Se ejecuta cuando el buffer de píxeles del CCD se ha llenado.
+ *
+ * @post	Se detuvo el DMA-ADC y se liberó adc_busy. Se liberó el semáforo, se activó send_now (envío de datos)
+ * y se intercambiaron los buffers.
+ */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+    if (hadc->Instance == ADC1) {
+    	adc_busy = 0;
+
+		can_save = 0;
+		send_now = 1;
+    }
 }

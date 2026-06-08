@@ -1,6 +1,6 @@
 import argparse
 import matplotlib.pyplot as plt
-from python.rx_data.spectrometer import SpectrometerDriver
+from spectrometer import SpectrometerDriver
 
 def main():
     parser = argparse.ArgumentParser(description="Controlador de Espectrómetro CCD")
