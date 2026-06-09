@@ -67,11 +67,13 @@ def main():
                 pixels = dev.read_frame()
                 
                 if pixels is not None:
+                    print("OK")
                     line.set_data(range(len(pixels)), pixels)
                     ax.relim()
                     # ax.autoscale_view()
                     fig.canvas.draw()
                     fig.canvas.flush_events()
+                dev.ser.reset_input_buffer()
         
         else:
             print("Comando no reconocido o vacío. Usa -h para ayuda.")

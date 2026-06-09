@@ -1,13 +1,21 @@
 #include <tcd_uart.h>
 
-extern volatile uint16_t continuous_frames[CCD_PIXELS];
+extern volatile uint16_t frame[CCD_PIXELS];
 extern volatile uint8_t can_save;
 extern volatile uint8_t send_now;
-
-volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
-
 extern UART_HandleTypeDef huart6;
+extern ADC_HandleTypeDef hadc1;
+extern volatile uint8_t process_instruction_flag;
+extern volatile uint8_t adc_busy;
 
+extern volatile uint32_t accum_buffer[CCD_PIXELS];
+extern volatile int acumulaciones;
+
+volatile uint32_t n_accum = 1;
+volatile uint16_t cmd_rx;
+volatile uint16_t payload_rx[2] = {0};
+volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
+volatile uint16_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_BYTES/2] = {0};
 volatile uint8_t uart_busy = 0;
 
 
@@ -28,26 +36,31 @@ uint16_t checksum_fxn(uint16_t a, uint16_t b){
  * @post Si hay un frame disponible y uart_busy == 0, modifica tx_packet_buffer y envia el paquete por DMA
  */
 void send_data_continuous_dma(void){
-	if(uart_busy == 1)
-		return;
+	//if(uart_busy == 1)
+		//return;
 
 	send_now = 0;
+
 	tx_packet_buffer[0] = HEADER;
 	tx_packet_buffer[1] = DATA_SENDING;
-	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
 	uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
 
 	for (int i = 0; i < CCD_PIXELS; i++) {
-		uint16_t value = continuous_frames[i];
+		uint16_t value = frame[i];
 		tx_packet_buffer[2 + i] = value;
 		cs = checksum_fxn(cs, value);
 	}
 
-	tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+	tx_packet_buffer[2 + CCD_PIXELS] = cs;
+
+	tx_packet_buffer[2 + CCD_PIXELS + 1] = END_BUFFER;
 
 	uart_busy = 1;
-	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer));
+
+	uint16_t bytes_to_send = (4 + CCD_PIXELS) * 2;
+	HAL_UART_Transmit_DMA(&huart6, (uint8_t*)tx_packet_buffer, bytes_to_send);
+	//HAL_UART_TxCpltCallback(&huart6);
 }
 
 /**
@@ -60,21 +73,25 @@ void send_data_continuous(void){
 
     tx_packet_buffer[0] = HEADER;
     tx_packet_buffer[1] = DATA_SENDING;
-    tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS] = END_BUFFER;
 
     uint16_t cs = HEADER ^ DATA_SENDING ^ END_BUFFER;
 
-
     for (int i = 0; i < CCD_PIXELS; i++) {
-        uint16_t value = continuous_frames[i];
+        uint16_t value = frame[i];
         tx_packet_buffer[2 + i] = value;
         cs = checksum_fxn(cs, value);
     }
 
-    tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS - 1] = cs;
+    tx_packet_buffer[2 + CCD_PIXELS] = cs;
+
+    tx_packet_buffer[2 + CCD_PIXELS + 1] = END_BUFFER;
 
     // Transmisión Bloqueante (~160ms a 460800 baudios)
-    HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, sizeof(tx_packet_buffer), HAL_MAX_DELAY);
+    uint16_t bytes_to_send = (4 + CCD_PIXELS) * 2;
+    HAL_UART_Transmit(&huart6, (uint8_t*)tx_packet_buffer, bytes_to_send, HAL_MAX_DELAY);
+
+    uart_busy = 0;
+    can_save = 1;
 }
 
 /**
@@ -100,6 +117,66 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     // Verificamos que sea la UART correcta
     if (huart->Instance == USART6)
     {
-        //process_instruction();
+    	// Verifico HEADER
+    	if(rx_cmd_buffer[0] != HEADER)
+    	    return;
+
+    	uint16_t cs = 0;
+    	for(int i = 0; i < SIZE_RX_BUFFER_CMD_BYTES/2; i++){
+    		cs = checksum_fxn(cs, rx_cmd_buffer[i]);
+    	}
+
+    	if(cs != 0)
+    		return;
+
+    	cmd_rx = rx_cmd_buffer[1];
+    	// HEADER (2 bytes) + CMD (2 bytes) + PAYLOAD (4 bytes) + CS (2 bytes)
+    	payload_rx[0] = rx_cmd_buffer[2];
+    	payload_rx[1] = rx_cmd_buffer[3];
+
+    	process_instruction_flag = 1;
     }
 }
+
+void reset_parameters(void){
+	process_instruction_flag = 0;
+	adc_busy = 0;
+	uart_busy = 0;
+	send_now = 0;
+	can_save = 1;
+	acumulaciones = 0;
+	for(int i = 0; i < CCD_PIXELS; i++){
+		accum_buffer[i] = 0;
+	}
+}
+
+void process_instruction(){
+	start_timers(0);
+	switch(cmd_rx){
+		case RESET_DEVICE:{
+			NVIC_SystemReset();
+			break;
+		}
+
+		case SET_INTEGRATION_TIME:{
+			uint32_t t_int_recibido = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
+			calculate_times(t_int_recibido);
+			build_SH_table();
+			break;
+		}
+
+		case SET_NUMBER_OF_ACCUMULATIONS:{
+			n_accum = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
+			// Chequear valor
+			break;
+		}
+
+		default:
+			break;
+	}
+
+	reset_parameters();
+	start_timers(1);
+}
+
+

@@ -8,15 +8,19 @@ extern ADC_HandleTypeDef hadc1;
 extern volatile uint8_t uart_busy;
 extern volatile uint8_t send_now;
 extern volatile uint8_t is_flushing;
+extern volatile uint32_t n_accum;
 
 volatile uint8_t adc_busy = 0;
 volatile uint8_t can_save = 1;
 
-volatile uint16_t continuous_frames[CCD_PIXELS];
+volatile uint16_t adc_buffer[CCD_PIXELS];
+volatile uint32_t accum_buffer[CCD_PIXELS] = {0};
+volatile uint16_t frame[CCD_PIXELS];
 
 volatile int n = 0;
 volatile int real_SH_EDGES = 0;
 uint32_t sh_ccr[SH_EDGES_MAX];
+volatile int acumulaciones = 0;
 
 const uint32_t TS0_tics = 1;
 const uint32_t TS1_tics = 2;
@@ -128,33 +132,30 @@ void build_SH_table(void)
  */
 void start_timers(uint8_t start){
 	if(start == 1){
-
-		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-		HAL_TIM_Base_Start(&htim1);
+		__HAL_TIM_SET_COUNTER(&htim1, 0);
+		__HAL_TIM_SET_COUNTER(&htim3, 0);
+		__HAL_TIM_SET_COUNTER(&htim5, 0);
 
 		__HAL_TIM_SET_AUTORELOAD(&htim5, sh_ccr[real_SH_EDGES-1] + TS6_tics);
-		__HAL_TIM_SET_COUNTER(&htim5, 0);
-		TIM_OC_InitTypeDef sConfigOC = {0};
+		__HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, sh_ccr[0]);
 
-		// Aplicar el TOGGLE
-		sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-		sConfigOC.Pulse = sh_ccr[0];
-		sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
-		HAL_TIM_OC_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_2);
-
-		__HAL_TIM_ENABLE_DMA(&htim5, TIM_DMA_CC2);
-
+		HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1);
 		HAL_TIM_OC_Start_DMA(&htim5, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
-		//HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
-		HAL_TIM_OC_Start_IT(&htim5, TIM_CHANNEL_4);
-		HAL_TIM_Base_Start(&htim5);
-
+		HAL_TIM_PWM_Start_IT(&htim5, TIM_CHANNEL_4);
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+
+		HAL_TIM_Base_Start(&htim1);
+		HAL_TIM_Base_Start(&htim5);
+		HAL_TIM_Base_Start(&htim3);
 	} else if(start == 0){
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
 		HAL_TIM_OC_Stop_DMA(&htim5, TIM_CHANNEL_2);
-		HAL_TIM_PWM_Stop(&htim5, TIM_CHANNEL_4);
+		HAL_TIM_PWM_Stop_IT(&htim5, TIM_CHANNEL_4);
+		HAL_TIM_PWM_Stop_IT(&htim1, TIM_CHANNEL_1);
+
+		HAL_TIM_Base_Stop(&htim3);
+		HAL_TIM_Base_Stop(&htim1);
 		HAL_TIM_Base_Stop(&htim5);
 	}
 
@@ -167,7 +168,7 @@ void start_timers(uint8_t start){
  *
  * @post	Si los recursos estaban permitidos, se activó el DMA-ADC
  */
-void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
+void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim) {
 	if(htim->Instance == TIM5 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_4){
 		//if(is_flushing == 1)
 			//return;
@@ -176,7 +177,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
 			return;
 
 		adc_busy = 1;
-		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)continuous_frames, CCD_PIXELS);
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, CCD_PIXELS);
 	}
 }
 
@@ -189,9 +190,42 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
  */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     if (hadc->Instance == ADC1) {
-    	adc_busy = 0;
+    	if(n_accum == 1){
+    		for (int i = 0; i < CCD_PIXELS; i++) {
+				frame[i] = (uint16_t)(adc_buffer[i]);
+			}
 
-		can_save = 0;
-		send_now = 1;
+			adc_busy = 0;
+			can_save = 0;
+			send_now = 1;
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, 1);
+			return;
+    	}
+
+    	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, 0);
+    	for(int i = 0; i < CCD_PIXELS; i++){
+    		accum_buffer[i] += adc_buffer[i];
+    	}
+
+    	acumulaciones++;
+
+    	if(acumulaciones >= n_accum){
+			for (int i = 0; i < CCD_PIXELS; i++) {
+				frame[i] = (uint16_t)(accum_buffer[i] / n_accum);
+				accum_buffer[i] = 0;
+			}
+
+			acumulaciones = 0;
+    		adc_busy = 0;
+    		can_save = 0;
+    		send_now = 1;
+
+    	}
+
+    	else{
+    		adc_busy = 0;
+    		can_save = 1;
+    		send_now = 0;
+    	}
     }
 }

@@ -14,12 +14,12 @@ class SpectrometerDriver:
     CMD_RESET               = 0xF002
     CMD_DATA_SENDING        = 0xF003
     CMD_SET_ACCUM           = 0xF004
-    CMD_SET_CONTINUOUS      = 0xF005
-    CMD_SET_FIXED_LENGTH    = 0xF006
+    #CMD_SET_CONTINUOUS      = 0xF005
+    #CMD_SET_FIXED_LENGTH    = 0xF006
     
     CCD_PIXELS = 3694
 
-    def __init__(self, port="COM7", baud=460800, timeout=2):
+    def __init__(self, port="COM7", baud=921600, timeout=2):
         self.int_time_us = 100
         self.n_accum = 50
         try:
@@ -67,7 +67,7 @@ class SpectrometerDriver:
             # print(f"TX: {final_packet.hex().upper()}")
             
             self.ser.write(final_packet)
-            
+            print(final_packet.hex().upper())
         except struct.error as e:
             print(f"Error empaquetando datos: {e}")
             print(f"Valores: CMD={cmd_id:X}, PAYLOAD={payload_val:X}")

@@ -59,6 +59,12 @@ DMA_HandleTypeDef hdma_usart6_tx;
 volatile uint8_t send_now = 0;
 volatile uint8_t is_flushing = 1;
 
+volatile uint8_t process_instruction_flag = 0;
+
+extern volatile uint16_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_BYTES/2];
+extern volatile uint8_t uart_busy;
+extern volatile uint8_t adc_busy;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -121,6 +127,8 @@ int main(void)
   build_SH_table();
   start_timers(1);
 
+  HAL_UART_Receive_DMA(&huart6, (uint8_t*) rx_cmd_buffer, SIZE_RX_BUFFER_CMD_BYTES);
+
   //HAL_Delay(100);
   //is_flushing = 0;
   /* USER CODE END 2 */
@@ -129,10 +137,19 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (HAL_GetTick() - ultimo_blink >= 1000) {
+	  /*if (HAL_GetTick() - ultimo_blink >= 1000) {
 	          HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
 	          ultimo_blink = HAL_GetTick();
-	      }
+	      }*/
+
+	  if(process_instruction_flag == 1){
+		  HAL_ADC_Stop_DMA(&hadc1);
+		  while(uart_busy == 1){
+			  HAL_Delay(100);
+		  }
+
+		  process_instruction();
+	  }
 
 	  if (send_now == 1) {
 		  send_data_continuous_dma();
@@ -469,7 +486,7 @@ static void MX_USART6_UART_Init(void)
 
   /* USER CODE END USART6_Init 1 */
   huart6.Instance = USART6;
-  huart6.Init.BaudRate = 460800;
+  huart6.Init.BaudRate = 921600;
   huart6.Init.WordLength = UART_WORDLENGTH_8B;
   huart6.Init.StopBits = UART_STOPBITS_1;
   huart6.Init.Parity = UART_PARITY_NONE;
