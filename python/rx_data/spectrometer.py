@@ -14,7 +14,7 @@ class SpectrometerDriver:
     CMD_RESET               = 0xF002
     CMD_DATA_SENDING        = 0xF003
     CMD_SET_ACCUM           = 0xF004
-    #CMD_SET_CONTINUOUS      = 0xF005
+    CMD_SET_SKIP_COUNTER    = 0xF005
     #CMD_SET_FIXED_LENGTH    = 0xF006
     
     CCD_PIXELS = 3694
@@ -88,11 +88,10 @@ class SpectrometerDriver:
         self._send_command(self.CMD_SET_ACCUM, n_accum)
         self.n_accum = n_accum                                      # Validar
 
-    def set_continuous_mode(self):
-        self._send_command(self.CMD_SET_CONTINUOUS)
-
-    def set_fixed_length_mode(self):
-        self._send_command(self.CMD_SET_FIXED_LENGTH)
+    def set_skip_counter(self, skip_count):
+        print(f"Set skip counter: {skip_count}")
+        self._send_command(self.CMD_SET_SKIP_COUNTER, skip_count)
+        self.skip_count = skip_count                                # Validar
 
     def read_frame(self):
         # Sincronizar Header

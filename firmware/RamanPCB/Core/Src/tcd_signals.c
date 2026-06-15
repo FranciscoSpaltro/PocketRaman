@@ -5,13 +5,14 @@ extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim5;
 extern ADC_HandleTypeDef hadc1;
-extern volatile uint8_t uart_busy;
 extern volatile uint8_t send_now;
-extern volatile uint8_t is_flushing;
+//extern volatile uint8_t is_flushing;
 extern volatile uint32_t n_accum;
+extern volatile uint32_t n_skip_counter;
 
 volatile uint8_t adc_busy = 0;
 volatile uint8_t can_save = 1;
+volatile uint32_t skip_counter = 0;
 
 volatile uint16_t adc_buffer[CCD_PIXELS];
 volatile uint32_t accum_buffer[CCD_PIXELS] = {0};
@@ -173,6 +174,13 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim) {
 		//if(is_flushing == 1)
 			//return;
 
+		if(skip_counter < n_skip_counter){
+			skip_counter++;
+			return;
+		} else {
+			skip_counter = 0;
+		}
+
 		if(adc_busy == 1 || can_save == 0)
 			return;
 
@@ -198,11 +206,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 			adc_busy = 0;
 			can_save = 0;
 			send_now = 1;
-			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, 1);
 			return;
     	}
 
-    	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, 0);
     	for(int i = 0; i < CCD_PIXELS; i++){
     		accum_buffer[i] += adc_buffer[i];
     	}

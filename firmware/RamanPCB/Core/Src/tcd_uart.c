@@ -7,17 +7,20 @@ extern UART_HandleTypeDef huart6;
 extern ADC_HandleTypeDef hadc1;
 extern volatile uint8_t process_instruction_flag;
 extern volatile uint8_t adc_busy;
+extern volatile uint32_t skip_counter;
 
 extern volatile uint32_t accum_buffer[CCD_PIXELS];
 extern volatile int acumulaciones;
 
+volatile uint8_t process_instruction_flag = 0;
+volatile uint8_t send_now = 0;
 volatile uint32_t n_accum = 1;
 volatile uint16_t cmd_rx;
 volatile uint16_t payload_rx[2] = {0};
 volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
 volatile uint16_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_BYTES/2] = {0};
 volatile uint8_t uart_busy = 0;
-
+volatile uint32_t n_skip_counter = 1;
 
 /**
  * @brief Establece la operación del checksum
@@ -145,6 +148,7 @@ void reset_parameters(void){
 	send_now = 0;
 	can_save = 1;
 	acumulaciones = 0;
+	skip_counter = 0;
 	for(int i = 0; i < CCD_PIXELS; i++){
 		accum_buffer[i] = 0;
 	}
@@ -162,12 +166,18 @@ void process_instruction(){
 			uint32_t t_int_recibido = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
 			calculate_times(t_int_recibido);
 			build_SH_table();
+			n_accum = 1;
 			break;
 		}
 
 		case SET_NUMBER_OF_ACCUMULATIONS:{
 			n_accum = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
 			// Chequear valor
+			break;
+		}
+
+		case SET_SKIP_COUNTER:{
+			n_skip_counter = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
 			break;
 		}
 

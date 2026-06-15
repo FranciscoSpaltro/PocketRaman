@@ -29,8 +29,11 @@ def main():
             else:
                 print("Error: Indica N acumulaciones con -v")
 
-        elif args.command == "cont":
-            dev.set_continuous_mode()
+        elif args.command == "skip":
+            if args.value > 0:
+                dev.set_skip_counter(args.value)
+            else:
+                print("Error: Indica N saltos con -v")
 
         elif args.command == "fixed":
             print(f"Activando modo longitud fija | Acumulaciones: {dev.n_accum} - Tiempo integración: {dev.int_time_us} us")

@@ -56,14 +56,12 @@ DMA_HandleTypeDef hdma_usart6_tx;
 
 /* USER CODE BEGIN PV */
 
-volatile uint8_t send_now = 0;
-volatile uint8_t is_flushing = 1;
-
-volatile uint8_t process_instruction_flag = 0;
+extern volatile uint8_t send_now;
+//volatile uint8_t is_flushing = 1;
+extern volatile uint8_t process_instruction_flag;
 
 extern volatile uint16_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_BYTES/2];
 extern volatile uint8_t uart_busy;
-extern volatile uint8_t adc_busy;
 
 /* USER CODE END PV */
 
@@ -137,10 +135,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  /*if (HAL_GetTick() - ultimo_blink >= 1000) {
-	          HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
-	          ultimo_blink = HAL_GetTick();
-	      }*/
+	  if (HAL_GetTick() - ultimo_blink >= 1000) {
+		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+		  ultimo_blink = HAL_GetTick();
+	  }
 
 	  if(process_instruction_flag == 1){
 		  HAL_ADC_Stop_DMA(&hadc1);
