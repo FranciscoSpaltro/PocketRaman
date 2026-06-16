@@ -138,9 +138,24 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     	payload_rx[1] = rx_cmd_buffer[3];
 
     	process_instruction_flag = 1;
+
+    	__HAL_UART_CLEAR_FLAG(huart, UART_FLAG_ORE | UART_FLAG_NE | UART_FLAG_FE);
+    	HAL_UART_Receive_IT(huart, (uint8_t*)rx_cmd_buffer, SIZE_RX_BUFFER_CMD_BYTES);
     }
 }
 
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART6)
+    {
+        // Si la UART tiró algún error en caliente, limpiamos los flags para destrabarla
+        __HAL_UART_CLEAR_FLAG(huart, UART_FLAG_ORE | UART_FLAG_NE | UART_FLAG_FE | UART_FLAG_PE);
+
+        // Y volvemos a encender de prepo la escucha de comandos
+        HAL_UART_Receive_IT(huart, (uint8_t*)rx_cmd_buffer, SIZE_RX_BUFFER_CMD_BYTES);
+    }
+}
 void reset_parameters(void){
 	process_instruction_flag = 0;
 	adc_busy = 0;

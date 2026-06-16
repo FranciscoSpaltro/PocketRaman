@@ -125,7 +125,8 @@ int main(void)
   build_SH_table();
   start_timers(1);
 
-  HAL_UART_Receive_DMA(&huart6, (uint8_t*) rx_cmd_buffer, SIZE_RX_BUFFER_CMD_BYTES);
+  //HAL_UART_Receive_DMA(&huart6, (uint8_t*) rx_cmd_buffer, SIZE_RX_BUFFER_CMD_BYTES);
+  HAL_UART_Receive_IT(&huart6, (uint8_t*)rx_cmd_buffer, SIZE_RX_BUFFER_CMD_BYTES);
 
   //HAL_Delay(100);
   //is_flushing = 0;
