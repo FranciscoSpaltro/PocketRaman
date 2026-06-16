@@ -17,10 +17,11 @@ volatile uint8_t send_now = 0;
 volatile uint32_t n_accum = 1;
 volatile uint16_t cmd_rx;
 volatile uint16_t payload_rx[2] = {0};
-volatile uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
 volatile uint16_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_BYTES/2] = {0};
 volatile uint8_t uart_busy = 0;
 volatile uint32_t n_skip_counter = 1;
+
+uint16_t ack_buffer[6] = {HEADER, ACK_COMMAND, 0xFFFF, 0xFFFF, HEADER^ACK_COMMAND^0xFFFF^0xFFFF^END_BUFFER, END_BUFFER};
 
 /**
  * @brief Establece la operación del checksum
@@ -41,6 +42,7 @@ uint16_t checksum_fxn(uint16_t a, uint16_t b){
 void send_data_continuous_dma(void){
 	//if(uart_busy == 1)
 		//return;
+	static uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
 
 	send_now = 0;
 
@@ -74,6 +76,7 @@ void send_data_continuous_dma(void){
 void send_data_continuous(void){
 	send_now = 0;
 
+	uint16_t tx_packet_buffer[OVERHEAD_8/2 + CCD_PIXELS + 1];
     tx_packet_buffer[0] = HEADER;
     tx_packet_buffer[1] = DATA_SENDING;
 
@@ -170,7 +173,10 @@ void reset_parameters(void){
 }
 
 void process_instruction(){
+
+	uint8_t processed = 0;
 	start_timers(0);
+
 	switch(cmd_rx){
 		case RESET_DEVICE:{
 			NVIC_SystemReset();
@@ -182,17 +188,20 @@ void process_instruction(){
 			calculate_times(t_int_recibido);
 			build_SH_table();
 			n_accum = 1;
+			processed = 1;
 			break;
 		}
 
 		case SET_NUMBER_OF_ACCUMULATIONS:{
 			n_accum = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
 			// Chequear valor
+			processed = 1;
 			break;
 		}
 
 		case SET_SKIP_COUNTER:{
 			n_skip_counter = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
+			processed = 1;
 			break;
 		}
 
@@ -200,8 +209,15 @@ void process_instruction(){
 			break;
 	}
 
+	if(processed ==1){
+		HAL_UART_Transmit(&huart6, (uint8_t*)ack_buffer, 12, HAL_MAX_DELAY);
+		HAL_Delay(5);
+		start_timers(1);
+	}
+
 	reset_parameters();
-	start_timers(1);
+
 }
+
 
 

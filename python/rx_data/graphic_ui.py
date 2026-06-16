@@ -22,7 +22,7 @@ class SpectrometerDriver:
     CMD_DATA_SENDING        = 0xF003
     CMD_SET_ACCUM           = 0xF004
     CMD_SET_SKIP_COUNTER    = 0xF005
-    
+    CMD_ACK                 = 0xFF46  # Comando de ACK del STM32
     CCD_PIXELS = 3694
 
     def __init__(self, port="COM7", baud=921600, timeout=2):
@@ -89,6 +89,7 @@ class SpectrometerDriver:
         header_bytes = struct.pack('<H', self.HEADER_VAL)
         window = bytearray()
         
+        # 1. Sincronizar Header (0x7346)
         while True:
             b = self.ser.read(1)
             if not b: return None # Timeout
@@ -97,19 +98,61 @@ class SpectrometerDriver:
             if window == header_bytes:
                 break
         
-        payload_size = self.CCD_PIXELS * 2
-        rest_len = 2 + payload_size + 2 + 2 
-        data = self.ser.read(rest_len)
-        
-        if len(data) != rest_len:
+        # 2. Leer el comando (2 bytes fijos)
+        cmd_bytes = self.ser.read(2)
+        if len(cmd_bytes) != 2:
             return None
+        
+        cmd_val = struct.unpack('<H', cmd_bytes)[0]
 
-        full_arr = np.frombuffer(data, dtype=np.dtype('<u2'))
+        # --- CASO A: CONFIRMACIÓN DE COMANDO (ACK = 0xFF46) ---
+        if cmd_val == self.CMD_ACK: 
+            # El ACK mide 12 bytes fijos. Ya leímos 4 bytes (Header + Cmd).
+            # Quedan por leer exactamente 8 bytes en el bus serial.
+            ack_rest = self.ser.read(8)
+            if len(ack_rest) != 8:
+                return None
+            
+            ack_arr = np.frombuffer(ack_rest, dtype=np.dtype('<u2'))
+            
+            if ack_arr[-1] == self.END_BUFFER_VAL: # 0x7347
+                print("--> ACK RECIBIDO EN PC: Parámetros aplicados con éxito en el microcontrolador.")
+            else:
+                print(f"--> ACK Recibido pero corrupto: Footer incorrecto (0x{ack_arr[-1]:04X})")
+                
+            return None # Retornamos None para que el lazo no intente graficar este paquete
+
+        # --- CASO B: DATOS DEL CCD (0xF003) ---
+        elif cmd_val == self.CMD_DATA_SENDING:
+            # Quedan por leer: Pixeles (CCD_PIXELS * 2 bytes) + Checksum (2 bytes) + Footer (2 bytes)
+            payload_size = self.CCD_PIXELS * 2
+            rest_len = payload_size + 2 + 2 
+            data = self.ser.read(rest_len)
+            
+            if len(data) != rest_len:
+                print(f"Error: Datos CCD incompletos. Se esperaban {rest_len} bytes, llegaron {len(data)}.")
+                return None
+
+            # Convertimos el bloque completo a enteros de 16 bits sin signo
+            full_arr = np.frombuffer(data, dtype=np.dtype('<u2'))
+            
+            # El Footer (0x7347) tiene que estar obligatoriamente en la última posición del array
+            if full_arr[-1] != self.END_BUFFER_VAL:
+                print(f"Error: Fin de buffer CCD inválido (Se leyó: 0x{full_arr[-1]:04X}, esperado: 0x{self.END_BUFFER_VAL:04X})")
+                return None
+
+            # Retornamos estrictamente el espectro (los 3694 píxeles), dejando afuera el CS y el Footer
+            pixels_clean = full_arr[:self.CCD_PIXELS]
+            
+            # Imprimimos un log rápido de control en la consola de Python para verificar el nivel de señal
+            print(f"Espectro capturado OK. Máximo valor del ADC: {np.max(pixels_clean)} cuentas.")
+            return pixels_clean
         
-        if full_arr[0] != self.CMD_DATA_SENDING or full_arr[-1] != self.END_BUFFER_VAL:
+        # --- CASO C: COMANDO EXTRAÑO / RUIDO ---
+        else:
+            # Si entra basura, leemos un byte para desalojar el bus y no trabar el sincronismo
+            self.ser.read(self.ser.in_waiting or 1)
             return None
-        
-        return full_arr[1 : 1 + self.CCD_PIXELS]
 
 # ==========================================
 # 2. EL HILO DE ADQUISICIÓN (Worker)

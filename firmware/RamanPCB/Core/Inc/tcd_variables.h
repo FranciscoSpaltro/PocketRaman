@@ -13,5 +13,7 @@
 #define SET_NUMBER_OF_ACCUMULATIONS						0xF004
 #define SET_SKIP_COUNTER								0xF005
 
+#define ACK_COMMAND										0xFF46
+
 
 #endif
