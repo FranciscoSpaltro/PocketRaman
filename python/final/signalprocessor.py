@@ -5,14 +5,16 @@ from scipy.signal import find_peaks
 
 class SignalProcessor:
     def __init__(self):
-        self.baseline_lambda = 0
-        self.smoothing_wd = 0
+        self.baseline_lambda = 10000
+        self.smoothing_wd = 2
         self.smoothing_poly = 1
         self.peak_height_factor = 1
         self.peak_min_distance = 1
         self.peak_width = 1
         self.peak_prominence = 1
         self.processing_enabled = False
+        self.last_processed_data = None
+        self.last_noise = 0
 
     def set_baseline_lambda(self, value):
         self.baseline_lambda = value
@@ -79,7 +81,8 @@ class SignalProcessor:
 
     def find_peaks(self, data):
         data_ = data.astype(float)
-        noise = 1.4826 * np.median(np.abs(data_ - np.median(data_)))
+        self.last_noise = 1.4826 * np.median(np.abs(data_ - np.median(data_)))
+        noise = self.last_noise
         height_threshold = self.peak_height_factor * noise
         prominence_threshold = self.peak_prominence * noise
         peaks, props = find_peaks(

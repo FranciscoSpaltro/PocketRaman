@@ -134,6 +134,10 @@ class RamanGUI(QMainWindow):
         sig_processing_layout.addWidget(self.lbl_enable_processing)
         sig_processing_layout.addWidget(self.btn_enable_processing)
         ########################################################################
+        ### NOISE
+        self.lbl_noise = QLabel("Noise: -")
+        sig_processing_layout.addWidget(self.lbl_noise)
+
 
         ########################################################################
         ### Baseline correction
@@ -146,7 +150,7 @@ class RamanGUI(QMainWindow):
         self.baseline_help_button.setFixedSize(22, 22)
         self.baseline_help_button.clicked.connect(lambda: show_baseline_help(self))
 
-        self.processor.set_baseline_lambda(0)
+        self.processor.set_baseline_lambda(10000)
         self.edit_baseline_lambda = QLineEdit(
             f"{self.processor.baseline_lambda:.1e}"
         )
@@ -174,9 +178,8 @@ class RamanGUI(QMainWindow):
         self.smoothing_help_button.clicked.connect(lambda: show_smoothing_help(self))
 
         # Window length
-        self.processor.set_smoothing_wd(0)
+        self.processor.set_smoothing_wd(2)
         self.edit_smoothing_wd = QLineEdit(str(self.processor.smoothing_wd))
-        self.edit_smoothing_wd.setValidator(QIntValidator(1, 3694))
 
         self.edit_smoothing_wd.editingFinished.connect(
             self.update_smoothing_wd
@@ -203,7 +206,7 @@ class RamanGUI(QMainWindow):
 
         ########################################################################
         ### Altura
-        self.lbl_height_factor = QLabel(f"Height factor: {self.processor.peak_height_factor}")
+        self.lbl_peak_height_factor = QLabel(f"Height factor")
 
         self.height_factor_help_button = QPushButton()
         self.height_factor_help_button.setIcon(
@@ -212,32 +215,25 @@ class RamanGUI(QMainWindow):
         self.height_factor_help_button.setFixedSize(22, 22)
         self.height_factor_help_button.clicked.connect(lambda: show_height_factor_help(self))
 
-        self.processor.set_height_factor(1)
-        self.slider_height_factor = QSlider(Qt.Horizontal)
-        self.slider_height_factor.setRange(1, 10000)
-        self.slider_height_factor.setValue(self.processor.peak_height_factor)
+        self.processor.set_peak_height_factor(1)
+        self.edit_peak_height_factor = QLineEdit(str(self.processor.peak_height_factor))
 
-        # Actualiza el texto mientras arrastro
-        self.slider_height_factor.valueChanged.connect(
-            self.update_height_label
-        )
-
-        # Ejecuta el procesamiento al soltar
-        self.slider_height_factor.sliderReleased.connect(
-            self.on_height_released
+        self.edit_peak_height_factor.editingFinished.connect(
+            self.update_peak_height_factor
         )
 
         height_factor_layout = QHBoxLayout()
-        height_factor_layout.addWidget(self.slider_height_factor)
+        height_factor_layout.addWidget(self.edit_peak_height_factor)
         height_factor_layout.addWidget(self.height_factor_help_button)
 
-        sig_processing_layout.addWidget(self.lbl_height_factor)
+        sig_processing_layout.addWidget(self.lbl_peak_height_factor)
         sig_processing_layout.addLayout(height_factor_layout)
         ########################################################################
 
         ########################################################################
         ### Prominence
-        self.lbl_prominence = QLabel(f"Prominence factor: {self.processor.peak_prominence}")
+        self.lbl_prominence = QLabel(f"Prominence factor")
+
         self.prominence_help_button = QPushButton()
         self.prominence_help_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
@@ -245,23 +241,15 @@ class RamanGUI(QMainWindow):
         self.prominence_help_button.setFixedSize(22, 22)
         self.prominence_help_button.clicked.connect(lambda: show_prominence_factor_help(self))
 
-        self.processor.set_prominence(1)
-        self.slider_prominence = QSlider(Qt.Horizontal)
-        self.slider_prominence.setRange(1, 10000)
-        self.slider_prominence.setValue(self.processor.peak_prominence)
+        self.processor.set_peak_prominence(1)
+        self.edit_peak_prominence = QLineEdit(str(self.processor.peak_prominence))
 
-        # Actualiza el texto mientras arrastro
-        self.slider_prominence.valueChanged.connect(
-            self.update_prominence_label
-        )
-
-        # Ejecuta el procesamiento al soltar
-        self.slider_prominence.sliderReleased.connect(
-            self.on_prominence_released
+        self.edit_peak_prominence.editingFinished.connect(
+            self.update_peak_prominence
         )
 
         prominence_layout = QHBoxLayout()
-        prominence_layout.addWidget(self.slider_prominence)
+        prominence_layout.addWidget(self.edit_peak_prominence)
         prominence_layout.addWidget(self.prominence_help_button)
 
         sig_processing_layout.addWidget(self.lbl_prominence)
@@ -270,7 +258,7 @@ class RamanGUI(QMainWindow):
 
         ########################################################################
         ### Distancia minima entre picos
-        self.lbl_min_distance = QLabel(f"Min peak distance: {self.processor.peak_min_distance}")
+        self.lbl_min_distance = QLabel(f"Min peak distance")
         self.min_distance_help_button = QPushButton()
         self.min_distance_help_button.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
@@ -278,27 +266,26 @@ class RamanGUI(QMainWindow):
         self.min_distance_help_button.setFixedSize(22, 22)
         self.min_distance_help_button.clicked.connect(lambda: show_minmum_peak_distance_help(self))
 
-        self.processor.set_min_distance(1)
-        self.slider_min_distance = QSlider(Qt.Horizontal)
-        self.slider_min_distance.setRange(1, 3693)
-        self.slider_min_distance.setValue(self.processor.peak_min_distance)
+        self.processor.set_peak_min_distance(1)
+        self.edit_peak_min_distance = QLineEdit(str(self.processor.peak_min_distance))
 
-        # Actualiza el texto mientras arrastro
-        self.slider_min_distance.valueChanged.connect(
-            self.update_min_distance_label
-        )
-
-        # Ejecuta el procesamiento al soltar
-        self.slider_min_distance.sliderReleased.connect(
-            self.on_min_distance_released
+        self.edit_peak_min_distance.editingFinished.connect(
+            self.update_peak_min_distance
         )
 
         min_distance_layout = QHBoxLayout()
-        min_distance_layout.addWidget(self.slider_min_distance)
+        min_distance_layout.addWidget(self.edit_peak_min_distance)
         min_distance_layout.addWidget(self.min_distance_help_button)
 
         sig_processing_layout.addWidget(self.lbl_min_distance)
         sig_processing_layout.addLayout(min_distance_layout)
+
+        ##############################################
+        # FIND PEAKS
+        self.btn_find_peaks = QPushButton("Find peaks")
+        self.btn_find_peaks.clicked.connect(self.find_and_plot_peaks)
+        sig_processing_layout.addWidget(self.btn_find_peaks)
+        
         ########################################################################
         group_sig_processing.setLayout(sig_processing_layout)
 
@@ -321,6 +308,14 @@ class RamanGUI(QMainWindow):
         
         # Crear la curva
         self.curve = self.plot_widget.plot(pen=pg.mkPen('b', width=2)) # Curva azul
+
+        # Picos
+        self.peaks_curve = self.plot_widget.plot(
+            pen=None,
+            symbol='o',
+            symbolSize=8,
+            symbolBrush='r'
+        )
 
         # Unir paneles
         main_layout.addWidget(control_widget)
@@ -395,8 +390,8 @@ class RamanGUI(QMainWindow):
     def update_smoothing_wd(self):
         val = int(self.edit_smoothing_wd.text())
         
-        if val < 1:
-            val = 1
+        if val < 2:
+            val = 2
         elif val > 3694:
             val = 3694
 
@@ -415,34 +410,57 @@ class RamanGUI(QMainWindow):
         self.processor.set_smoothing_poly(val)  
 
     ### HEIGHT
-    def update_height_label(self, value):
-        self.lbl_height_factor.setText(f"Height factor: {value}")
+    def update_peak_height_factor(self):
+        val = float(self.edit_peak_height_factor.text())
+        if val < 0:
+            val = 0
 
-    def on_height_released(self):
-        value = self.slider_height_factor.value()
-        self.processor.set_peak_height_factor(value)
+        self.edit_peak_height_factor.setText(f"{val:.2f}")
+        self.processor.set_peak_height_factor(val)
+
+     ### PROMINENCE
+    def update_peak_prominence(self):
+        val = float(self.edit_peak_prominence.text())
+        if val < 0:
+            val = 0
+
+        self.edit_peak_prominence.setText(f"{val:.2f}")
+        self.processor.set_peak_prominence(val)
 
     ### MIN DISTANCE
-    def update_min_distance_label(self, value):
-        self.lbl_min_distance.setText(f"Min peak distance: {value}")
+    def update_peak_min_distance(self):
+        val = int(self.edit_peak_min_distance.text())
+        if val < 1:
+            val = 1
+        elif val > 3693:
+            val = 3693
 
-    def on_min_distance_released(self):
-        value = self.slider_min_distance.value()
-        self.processor.set_peak_min_distance(value)
-
-    ### PROMINENCE
-    def update_prominence_label(self, value):
-        self.lbl_prominence.setText(f"Prominence factor: {value}")
-
-    def on_prominence_released(self):
-        value = self.slider_prominence.value()
-        self.processor.set_peak_prominence(value)
-
+        self.edit_peak_min_distance.setText(str(val))
+        self.processor.set_peak_min_distance(val)
 
     @Slot(np.ndarray)
     def update_plot(self, data):
-        processed_data, peaks = self.processor.process(data)
+        processed_data, _ = self.processor.process(data)
+
+        self.processor.last_processed_data = processed_data
         self.curve.setData(processed_data)
+
+    def find_and_plot_peaks(self):
+        if self.processor.last_processed_data is None:
+            return
+
+        peaks = self.processor.find_peaks(self.processor.last_processed_data)
+
+        self.lbl_noise.setText(
+            f"Noise: {self.processor.last_noise:.2f} ADC counts"
+        )
+
+        if len(peaks) > 0:
+            x_peaks = peaks
+            y_peaks = self.processor.last_processed_data[peaks]
+            self.peaks_curve.setData(x_peaks, y_peaks)
+        else:
+            self.peaks_curve.setData([], [])
 
     def closeEvent(self, event):
         # Se ejecuta al cerrar la ventana con la "X"
