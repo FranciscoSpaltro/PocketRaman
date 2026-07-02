@@ -1,31 +1,26 @@
-from PySide6.QtWidgets import (QDoubleSpinBox, QMainWindow, QWidget, QVBoxLayout, 
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QLabel, QLineEdit, 
-                               QSpinBox, QGroupBox, QSlider, QMessageBox, QLineEdit, QStyle)
-from PySide6.QtGui import QIntValidator
-from PySide6.QtCore import Slot, Qt
+                               QSpinBox, QGroupBox, QMessageBox, QLineEdit, QStyle)
+from PySide6.QtCore import Slot
 from signalprocessor import SignalProcessor
 from spectrometer import SpectrometerDriverMock
 from adquisition import AcquisitionThread
 from help_messages import *
 import pyqtgraph as pg
-import numpy as np
-
-# ==========================================
-# INTERFAZ GRÁFICA (PySide6)
-# ==========================================
-class ScientificDoubleSpinBox(QDoubleSpinBox):
-    def textFromValue(self, value):
-        return f"{value:.1e}"
-
-    def valueFromText(self, text):
-        return float(text)
-    
+import numpy as np   
     
 class RamanGUI(QMainWindow):
+    ###########################################################################
+    # CONSTRUCTOR AND INITIALIZATION
+    ###########################################################################
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Spectrometer Raman - Control Panel")
         self.resize(1000, 600)
+
+        self.peaks_enabled = False
+        self.peak_labels_enabled = False
+        self.peak_labels = []
 
         self.dev = None
         self.worker = None
@@ -33,19 +28,24 @@ class RamanGUI(QMainWindow):
 
         self.setup_ui()
 
+    ###########################################################################
+    # GUI SETUP
+    ###########################################################################
     def setup_ui(self):
-        # Widget central y layout principal (Horizontal: Controles izq, Gráfico der)
+        # Central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
 
-        # --- PANEL IZQUIERDO (Controles) ---
-        control_widget = QWidget()          # Widget contenedor
-        control_widget.setFixedWidth(250)   # Fija el ancho
-        control_layout = QVBoxLayout(control_widget) # El layout ahora maneja al widget
+        ##########################################################################
+        # LEFT PANEL (CONTROLS)
+        #########################################################################
+        control_widget = QWidget()
+        control_widget.setFixedWidth(250)
+        control_layout = QVBoxLayout(control_widget)
 
-        ########################################################################
-        # Grupo: Conexión
+        #########################################################################
+        # CONNECTION GROUP
         group_conn = QGroupBox("Connection")
         conn_layout = QVBoxLayout()
         self.port_input = QLineEdit("COM7")
@@ -55,13 +55,12 @@ class RamanGUI(QMainWindow):
         conn_layout.addWidget(self.port_input)
         conn_layout.addWidget(self.btn_connect)
         group_conn.setLayout(conn_layout)
-        ########################################################################
 
-        # Grupo: Comandos
+        ########################################################################
+        # COMMANDS GROUP
         group_cmds = QGroupBox("STM32 configuration")
         cmds_layout = QVBoxLayout()
-
-        ########################################################################        
+        
         # Tiempo de integración
         self.spin_time = QSpinBox()
         self.spin_time.setRange(1, 1000000)
@@ -70,9 +69,7 @@ class RamanGUI(QMainWindow):
         self.btn_time.clicked.connect(lambda: self.send_cmd('time'))
         cmds_layout.addWidget(self.spin_time)
         cmds_layout.addWidget(self.btn_time)
-        ########################################################################
-
-        ########################################################################
+        
         # Acumulaciones
         self.spin_accum = QSpinBox()
         self.spin_accum.setRange(1, 1000)
@@ -81,9 +78,7 @@ class RamanGUI(QMainWindow):
         self.btn_accum.clicked.connect(lambda: self.send_cmd('accum'))
         cmds_layout.addWidget(self.spin_accum)
         cmds_layout.addWidget(self.btn_accum)
-        ########################################################################
 
-        ########################################################################
         # Skip
         self.spin_skip = QSpinBox()
         self.spin_skip.setRange(0, 1000)
@@ -92,23 +87,18 @@ class RamanGUI(QMainWindow):
         self.btn_skip.clicked.connect(lambda: self.send_cmd('skip'))
         cmds_layout.addWidget(self.spin_skip)
         cmds_layout.addWidget(self.btn_skip)
-        ########################################################################
 
-        ########################################################################
         # Reset
         self.btn_reset = QPushButton("Reset Device")
         self.btn_reset.setStyleSheet("background-color: #ffcccc;")
         self.btn_reset.clicked.connect(lambda: self.send_cmd('reset'))
         cmds_layout.addWidget(self.btn_reset)
-        ########################################################################
-        
+
+        # GROUP    
         group_cmds.setLayout(cmds_layout)
 
         ########################################################################
-        ########################################################################
-        ########################################################################
-
-        # Grupo: Adquisición
+        # ADQUISITION GROUP
         group_acq = QGroupBox("Continuous Acquisition")
         acq_layout = QVBoxLayout()
         self.btn_start = QPushButton("▶ Start Reading")
@@ -118,30 +108,22 @@ class RamanGUI(QMainWindow):
         acq_layout.addWidget(self.btn_start)
         group_acq.setLayout(acq_layout)
 
-        ########################################################################
-        ########################################################################
-        ########################################################################
-
-        # Grupo: Procesamiento de señales
+        # SIGNAL PROCESSING GROUP
         group_sig_processing = QGroupBox("Procesamiento en vivo")
         sig_processing_layout = QVBoxLayout()
         
-        ########################################################################
-        ### Enable/Disable data processing
+        # Enable/Disable data processing
         self.lbl_enable_processing = QLabel("Data processing")
         self.btn_enable_processing = QPushButton("Enable")
         self.btn_enable_processing.clicked.connect(self.toggle_enable_processing)
         sig_processing_layout.addWidget(self.lbl_enable_processing)
         sig_processing_layout.addWidget(self.btn_enable_processing)
-        ########################################################################
-        ### NOISE
+        
+        # Noise label
         self.lbl_noise = QLabel("Noise: -")
         sig_processing_layout.addWidget(self.lbl_noise)
 
-
-        ########################################################################
-        ### Baseline correction
-        # En 0 no hace nada (por implementación de signalprocessor), el máximo se configuró experimentalmente en 1e14
+        # Baseline correction (0 is disabled)
         self.lbl_baseline = QLabel("Baseline λ")
         self.baseline_help_button = QPushButton()
         self.baseline_help_button.setIcon(
@@ -165,10 +147,8 @@ class RamanGUI(QMainWindow):
 
         sig_processing_layout.addWidget(self.lbl_baseline)
         sig_processing_layout.addLayout(baseline_layout)
-        ########################################################################
 
-        ########################################################################
-        ### Suavizado
+        # Smoothing
         self.lbl_smoothing = QLabel("Smoothing")
         self.smoothing_help_button = QPushButton()
         self.smoothing_help_button.setIcon(
@@ -177,7 +157,7 @@ class RamanGUI(QMainWindow):
         self.smoothing_help_button.setFixedSize(22, 22)
         self.smoothing_help_button.clicked.connect(lambda: show_smoothing_help(self))
 
-        # Window length
+        # (Window length)
         self.processor.set_smoothing_wd(2)
         self.edit_smoothing_wd = QLineEdit(str(self.processor.smoothing_wd))
 
@@ -185,7 +165,7 @@ class RamanGUI(QMainWindow):
             self.update_smoothing_wd
         )
 
-        # Polynomial order
+        # (Polynomial order)
         self.processor.set_smoothing_poly(1)
         self.edit_smoothing_poly = QLineEdit(str(self.processor.smoothing_poly))
 
@@ -202,10 +182,8 @@ class RamanGUI(QMainWindow):
 
         sig_processing_layout.addWidget(self.lbl_smoothing)
         sig_processing_layout.addLayout(smoothing_layout)
-        ########################################################################
 
-        ########################################################################
-        ### Altura
+        # Peak height factor
         self.lbl_peak_height_factor = QLabel(f"Height factor")
 
         self.height_factor_help_button = QPushButton()
@@ -228,10 +206,8 @@ class RamanGUI(QMainWindow):
 
         sig_processing_layout.addWidget(self.lbl_peak_height_factor)
         sig_processing_layout.addLayout(height_factor_layout)
-        ########################################################################
 
-        ########################################################################
-        ### Prominence
+        # Prominence
         self.lbl_prominence = QLabel(f"Prominence factor")
 
         self.prominence_help_button = QPushButton()
@@ -254,10 +230,8 @@ class RamanGUI(QMainWindow):
 
         sig_processing_layout.addWidget(self.lbl_prominence)
         sig_processing_layout.addLayout(prominence_layout)
-        ########################################################################
 
-        ########################################################################
-        ### Distancia minima entre picos
+        # Min peak distance
         self.lbl_min_distance = QLabel(f"Min peak distance")
         self.min_distance_help_button = QPushButton()
         self.min_distance_help_button.setIcon(
@@ -280,25 +254,31 @@ class RamanGUI(QMainWindow):
         sig_processing_layout.addWidget(self.lbl_min_distance)
         sig_processing_layout.addLayout(min_distance_layout)
 
-        ##############################################
-        # FIND PEAKS
+        # Find peaks
         self.btn_find_peaks = QPushButton("Find peaks")
-        self.btn_find_peaks.clicked.connect(self.find_and_plot_peaks)
+        self.btn_find_peaks.clicked.connect(self.toggle_find_peaks)
         sig_processing_layout.addWidget(self.btn_find_peaks)
+
+        # Show peak labels
+        self.btn_peak_labels = QPushButton("Show peak labels")
+        self.btn_peak_labels.clicked.connect(self.toggle_peak_labels)
+        sig_processing_layout.addWidget(self.btn_peak_labels)
         
-        ########################################################################
+        # Group
         group_sig_processing.setLayout(sig_processing_layout)
 
-        # Armar el panel izquierdo
+        # Construct the left panel
         control_layout.addWidget(group_conn)
         control_layout.addWidget(group_cmds)
         control_layout.addWidget(group_acq)
         control_layout.addWidget(group_sig_processing)
-        control_layout.addStretch() # Empuja todo hacia arriba
+        control_layout.addStretch()
 
-        # --- PANEL DERECHO (Gráfico) ---
-        pg.setConfigOption('background', 'w') # Fondo blanco
-        pg.setConfigOption('foreground', 'k') # Texto negro
+        ##########################################################################
+        # RIGHT PANEL (GRAPH)
+        #########################################################################
+        pg.setConfigOption('background', 'w')
+        pg.setConfigOption('foreground', 'k')
         self.plot_widget = pg.PlotWidget(title="Spectrum in Real Time")
         self.plot_widget.setLabel('left', 'Intensity (ADC)', units='')
         self.plot_widget.setLabel('bottom', 'Pixel', units='')
@@ -306,10 +286,8 @@ class RamanGUI(QMainWindow):
         self.plot_widget.setXRange(0, 3694)
         self.plot_widget.showGrid(x=True, y=True)
         
-        # Crear la curva
         self.curve = self.plot_widget.plot(pen=pg.mkPen('b', width=2)) # Curva azul
 
-        # Picos
         self.peaks_curve = self.plot_widget.plot(
             pen=None,
             symbol='o',
@@ -317,11 +295,12 @@ class RamanGUI(QMainWindow):
             symbolBrush='r'
         )
 
-        # Unir paneles
         main_layout.addWidget(control_widget)
         main_layout.addWidget(self.plot_widget)
 
-    # --- SLOTS (Acciones de la interfaz) ---
+    ###########################################################################
+    # DEVICE CONNECTION
+    ###########################################################################
     def connect_device(self):
         port = self.port_input.text()
         try:
@@ -339,6 +318,9 @@ class RamanGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Connection Error", f"Could not connect to {port}.\n\n{str(e)}")
 
+    ############################################################################
+    # COMMANDS
+    ############################################################################
     def send_cmd(self, cmd_type):
         if not self.dev: return
         
@@ -354,6 +336,11 @@ class RamanGUI(QMainWindow):
             val = self.spin_skip.value()
             self.dev.set_skip_counter(val)
 
+    ############################################################################
+    # UPDATERS
+    ############################################################################
+    # ADQUISITION BUTTON
+
     def toggle_acquisition(self):
         if not self.worker.running:
             # Arrancar
@@ -366,7 +353,7 @@ class RamanGUI(QMainWindow):
             self.btn_start.setText("▶ Start Reading")
             self.btn_start.setStyleSheet("background-color: #ccffcc;")
 
-    ### ENABLE/DISABLE DATA PROCESSING
+    # ENABLE/DISABLE DATA PROCESSING BUTTON
     def toggle_enable_processing(self):
         enabled = self.btn_enable_processing.text() == "Enable"
 
@@ -377,67 +364,72 @@ class RamanGUI(QMainWindow):
 
         self.processor.set_enable_processing(enabled)
     
-    ### BASELINE CORRECTION
+    # BASELINE
     def update_baseline(self):
         val = float(self.edit_baseline_lambda.text())
-
-        val = min(max(val, 0), 1e14)  # Limitar entre 0 y 1e14
-        
-        self.edit_baseline_lambda.setText(f"{val:.1e}")
         self.processor.set_baseline_lambda(val)
+        self.edit_baseline_lambda.setText(f"{self.processor.baseline_lambda:.1e}")
 
-    ### SMOOTHING
+    # SMOOTHING (WD)
     def update_smoothing_wd(self):
         val = int(self.edit_smoothing_wd.text())
-        
-        if val < 2:
-            val = 2
-        elif val > 3694:
-            val = 3694
-
-        self.edit_smoothing_wd.setText(str(val))
         self.processor.set_smoothing_wd(val)    
-        
+        self.edit_smoothing_wd.setText(str(self.processor.smoothing_wd))
+    
+    # SMOOTHING (POLYORDER)
     def update_smoothing_poly(self):
         val = int(self.edit_smoothing_poly.text())
-        
-        if val < 1:
-            val = 1
-        elif val > self.processor.smoothing_wd - 1:
-            val = self.processor.smoothing_wd - 1
-
-        self.edit_smoothing_poly.setText(str(val))
         self.processor.set_smoothing_poly(val)  
+        self.edit_smoothing_poly.setText(str(self.processor.smoothing_poly))
 
-    ### HEIGHT
+    # PEAK HEIGHT FACTOR
     def update_peak_height_factor(self):
         val = float(self.edit_peak_height_factor.text())
-        if val < 0:
-            val = 0
-
-        self.edit_peak_height_factor.setText(f"{val:.2f}")
         self.processor.set_peak_height_factor(val)
+        self.edit_peak_height_factor.setText(f"{self.processor.peak_height_factor:.2f}")
 
-     ### PROMINENCE
+    # PEAK PROMINENCE
     def update_peak_prominence(self):
         val = float(self.edit_peak_prominence.text())
-        if val < 0:
-            val = 0
-
-        self.edit_peak_prominence.setText(f"{val:.2f}")
         self.processor.set_peak_prominence(val)
+        self.edit_peak_prominence.setText(f"{self.processor.peak_prominence:.2f}")
 
-    ### MIN DISTANCE
+
+    # MIN DISTANCE
     def update_peak_min_distance(self):
         val = int(self.edit_peak_min_distance.text())
-        if val < 1:
-            val = 1
-        elif val > 3693:
-            val = 3693
-
-        self.edit_peak_min_distance.setText(str(val))
         self.processor.set_peak_min_distance(val)
+        self.edit_peak_min_distance.setText(str(self.processor.peak_min_distance))
 
+    # TOGGLE PEAK FINDING
+    def toggle_find_peaks(self):
+        self.peaks_enabled = not self.peaks_enabled
+
+        if self.peaks_enabled:
+            self.btn_find_peaks.setText("Hide peaks")
+            self.find_and_plot_peaks()
+        else:
+            self.btn_find_peaks.setText("Find peaks")
+            self.peaks_curve.setData([], [])
+
+    # TOGGLE PEAK LABELS
+    def toggle_peak_labels(self):
+        self.peak_labels_enabled = not self.peak_labels_enabled
+
+        if self.peak_labels_enabled:
+            self.btn_peak_labels.setText("Hide peak labels")
+            if self.peaks_enabled:
+                self.find_and_plot_peaks()
+        else:
+            self.btn_peak_labels.setText("Show peak labels")
+            self.clear_peak_labels()
+
+    def clear_peak_labels(self):
+        for label in self.peak_labels:
+            self.plot_widget.removeItem(label)
+        self.peak_labels.clear()
+
+    # UPDATE PLOT
     @Slot(np.ndarray)
     def update_plot(self, data):
         processed_data, _ = self.processor.process(data)
@@ -445,25 +437,44 @@ class RamanGUI(QMainWindow):
         self.processor.last_processed_data = processed_data
         self.curve.setData(processed_data)
 
+        self.lbl_noise.setText(
+            f"Noise: {self.processor.last_noise:.2f} ADC counts"
+        )
+
+        if self.peaks_enabled:
+            self.find_and_plot_peaks()
+
+    # FIND AND PLOT PEAKS
     def find_and_plot_peaks(self):
         if self.processor.last_processed_data is None:
             return
 
         peaks = self.processor.find_peaks(self.processor.last_processed_data)
 
-        self.lbl_noise.setText(
-            f"Noise: {self.processor.last_noise:.2f} ADC counts"
-        )
+        self.clear_peak_labels()
 
         if len(peaks) > 0:
             x_peaks = peaks
             y_peaks = self.processor.last_processed_data[peaks]
             self.peaks_curve.setData(x_peaks, y_peaks)
+
+            if self.peak_labels_enabled:
+                for x, y in zip(x_peaks, y_peaks):
+                    label = pg.TextItem(
+                        text=f"{x}, {y:.0f}",
+                        color=(30, 30, 30),
+                        fill=pg.mkBrush(255, 255, 255, 255),
+                        border=pg.mkPen((120, 120, 120)),
+                        anchor=(0.5, 1.2),
+                    )
+                    label.setPos(x, y)
+                    self.plot_widget.addItem(label)
+                    self.peak_labels.append(label)
         else:
             self.peaks_curve.setData([], [])
 
+    # CLOSE EVENT
     def closeEvent(self, event):
-        # Se ejecuta al cerrar la ventana con la "X"
         if self.worker and self.worker.running:
             self.worker.stop()
         if self.dev:
