@@ -143,7 +143,7 @@ class SpectrometerDriver:
             return None
 
 ##### Mock class for testing without hardware
-from fake_spectra import generate_fake_raman_raw
+from synthetic_spectra import generate_synthetic_raman_raw
 class SpectrometerDriverMock:
     def __init__(self, port="COM7", baud=921600, timeout=2):
         self.int_time_us = 100
@@ -183,6 +183,13 @@ class SpectrometerDriverMock:
         self.skip_count = skip_count
 
     def read_frame(self):
-        pixels_clean = generate_fake_raman_raw(n_pixels=3694, peaks=None, baseline_offset=800, baseline_slope=0.08, baseline_curve=300, noise_std=20, adc_max=4095, seed=None)[1]
-        return pixels_clean
-        
+        _, pixels_raw, _, _ = generate_synthetic_raman_raw(
+            seed=42,
+            hot_pixel_prob=0.0,
+            dead_pixel_prob=0.0,
+            cosmic_ray_prob=0.0,
+            fixed_pattern_std=0.003,
+            read_noise_std=10,
+            shot_noise_scale=0.3,
+        )
+        return pixels_raw
