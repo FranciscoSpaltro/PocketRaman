@@ -41,3 +41,5 @@ echo "Repo: $REPO_DIR"
 echo "Venv: $VENV_DIR"
 echo "Activate with:"
 echo "source $VENV_DIR/bin/activate"
+
+# Allow executing: chmod +x setup_rpi.sh
