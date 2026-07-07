@@ -1,12 +1,13 @@
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QComboBox,
                                QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                                QSpinBox, QGroupBox, QMessageBox, QLineEdit, QStyle)
 from PySide6.QtCore import Slot
 from signalprocessor import SignalProcessor
-from spectrometer import SpectrometerDriverMock
+from spectrometer import SpectrometerDriver
 from adquisition import AcquisitionThread
 from help_messages import *
 import pyqtgraph as pg
+from serial.tools import list_ports
 import numpy as np   
     
 class RamanGUI(QMainWindow):
@@ -48,13 +49,25 @@ class RamanGUI(QMainWindow):
         # CONNECTION GROUP
         group_conn = QGroupBox("Connection")
         conn_layout = QVBoxLayout()
-        self.port_input = QLineEdit("COM7")
+
+        port_layout = QHBoxLayout()
+
+        self.port_input = QComboBox()
+        self.btn_refresh_ports = QPushButton("Refresh")
+        self.btn_refresh_ports.clicked.connect(self.refresh_ports)
+
+        port_layout.addWidget(self.port_input)
+        port_layout.addWidget(self.btn_refresh_ports)
+
         self.btn_connect = QPushButton("Connect")
         self.btn_connect.clicked.connect(self.connect_device)
-        conn_layout.addWidget(QLabel("Port COM:"))
-        conn_layout.addWidget(self.port_input)
+
+        conn_layout.addWidget(QLabel("Serial port:"))
+        conn_layout.addLayout(port_layout)
         conn_layout.addWidget(self.btn_connect)
+
         group_conn.setLayout(conn_layout)
+        self.refresh_ports()
 
         ########################################################################
         # COMMANDS GROUP
@@ -302,9 +315,13 @@ class RamanGUI(QMainWindow):
     # DEVICE CONNECTION
     ###########################################################################
     def connect_device(self):
-        port = self.port_input.text()
+        port = self.port_input.currentData()
+        if port is None:
+            QMessageBox.warning(self, "Connection error", "No serial port selected.")
+            return
+        
         try:
-            self.dev = SpectrometerDriverMock(port=port)
+            self.dev = SpectrometerDriver(port=port)
             self.btn_connect.setText("Connected")
             self.btn_connect.setStyleSheet("background-color: #ccffcc;")
             self.btn_connect.setEnabled(False)
@@ -472,6 +489,27 @@ class RamanGUI(QMainWindow):
                     self.peak_labels.append(label)
         else:
             self.peaks_curve.setData([], [])
+
+    # REFRESH PORTS
+    def refresh_ports(self):
+        current = self.port_input.currentData()
+        self.port_input.clear()
+
+        ports = list(list_ports.comports())
+
+        if not ports:
+            self.port_input.addItem("No serial devices found", None)
+            self.btn_connect.setEnabled(False)
+            return
+        
+        for port in ports:
+            self.port_input.addItem(f"{port.device} ({port.description})", port.device)
+
+        self.btn_connect.setEnabled(True)
+        for i in range(self.port_input.count()):
+            if self.port_input.itemData(i) == current:
+                self.port_input.setCurrentIndex(i)
+                break
 
     # CLOSE EVENT
     def closeEvent(self, event):
