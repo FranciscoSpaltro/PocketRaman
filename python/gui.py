@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QComboBox,
-                               QHBoxLayout, QPushButton, QLabel, QLineEdit, 
-                               QSpinBox, QGroupBox, QMessageBox, QLineEdit, QStyle)
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QComboBox, QDialog,
+                               QHBoxLayout, QPushButton, QLabel, QLineEdit, QCheckBox,
+                               QSpinBox, QGroupBox, QMessageBox, QLineEdit, QDialogButtonBox)
 from PySide6.QtCore import Slot
 from signalprocessor import SignalProcessor
 from spectrometer import SpectrometerDriver
@@ -9,7 +9,179 @@ from help_messages import *
 import pyqtgraph as pg
 from serial.tools import list_ports
 import numpy as np   
-    
+from signalprocessor import (DARK_N_SAMPLES_DEFAULT, SPIKE_WINDOW_DEFAULT, SPIKE_T_MULTIPLIER_DEFAULT, N_SPECTRA_DEFAULT,
+                             FILTER_WINDOW_DEFAULT, FILTER_POLY_ORDER_DEFAULT, BASELINE_LAMBDA_DEFAULT, BASELINE_DIFF_ORDER_DEFAULT,
+                             BASELINE_ITERATIONS_DEFAULT, BASELINE_TOLERANCE_DEFAULT, ENABLE_DARK_SUBTRACTION_DEFAULT, ENABLE_SPIKE_CORRECTION_DEFAULT,
+                             ENABLE_FILTERING_DEFAULT, ENABLE_BASELINE_CORRECTION_DEFAULT, ENABLE_NORMALIZATION_DEFAULT)
+
+class ProcessingConfigDialog(QDialog):
+    def __init__(self, processor, parent=None):
+        super().__init__(parent)
+        self.processor = processor
+        
+        self.setWindowTitle("Processing Configuration")
+        layout = QVBoxLayout(self)
+
+        # Dark spectrum
+        self.line_dark_n_samples = QLineEdit()
+        self.line_dark_n_samples.setText(str(getattr(self.processor, "dark_n_samples", DARK_N_SAMPLES_DEFAULT)))
+
+        row_dark = QHBoxLayout()
+        row_dark.addWidget(QLabel("Dark samples:"))
+        row_dark.addWidget(self.line_dark_n_samples)
+        layout.addLayout(row_dark)
+
+        # Spike window
+        self.line_spike_window = QLineEdit()
+        self.line_spike_window.setText(str(getattr(self.processor, "spike_window", SPIKE_WINDOW_DEFAULT)))
+
+        row_spike = QHBoxLayout()
+        row_spike.addWidget(QLabel("Spike window:"))
+        row_spike.addWidget(self.line_spike_window)
+        layout.addLayout(row_spike)
+
+        # Spike T multiplier
+        self.line_spike_T_multiplier = QLineEdit()
+        self.line_spike_T_multiplier.setText(str(getattr(self.processor, "spike_T_multiplier", SPIKE_T_MULTIPLIER_DEFAULT)))
+        
+        row_spike_T = QHBoxLayout()
+        row_spike_T.addWidget(QLabel("Spike T multiplier:"))
+        row_spike_T.addWidget(self.line_spike_T_multiplier)
+        layout.addLayout(row_spike_T)
+
+        # Number of spectra
+        self.line_n_spectra = QLineEdit()
+        self.line_n_spectra.setText(str(getattr(self.processor, "n_spectra", N_SPECTRA_DEFAULT)))
+
+        row_n_spectra = QHBoxLayout()
+        row_n_spectra.addWidget(QLabel("Number of spectra:"))
+        row_n_spectra.addWidget(self.line_n_spectra)
+        layout.addLayout(row_n_spectra)
+
+        # Filter window
+        self.line_filter_window = QLineEdit()
+        self.line_filter_window.setText(str(getattr(self.processor, "filter_window", FILTER_WINDOW_DEFAULT)))
+        
+        row_filter_window = QHBoxLayout()
+        row_filter_window.addWidget(QLabel("Filter window:"))
+        row_filter_window.addWidget(self.line_filter_window)
+        layout.addLayout(row_filter_window)
+
+        # Filter polynomial order
+        self.line_filter_poly_order = QLineEdit()
+        self.line_filter_poly_order.setText(str(getattr(self.processor, "filter_poly_order", FILTER_POLY_ORDER_DEFAULT)))
+        
+        row_filter_poly = QHBoxLayout()
+        row_filter_poly.addWidget(QLabel("Filter polynomial order:"))
+        row_filter_poly.addWidget(self.line_filter_poly_order)
+        layout.addLayout(row_filter_poly)
+        
+        # Baseline lambda
+        self.line_baseline_lambda = QLineEdit()
+        self.line_baseline_lambda.setText(str(getattr(self.processor, "baseline_lambda", BASELINE_LAMBDA_DEFAULT)))
+
+        row_baseline_lambda = QHBoxLayout()
+        row_baseline_lambda.addWidget(QLabel("Baseline lambda:"))
+        row_baseline_lambda.addWidget(self.line_baseline_lambda)
+        layout.addLayout(row_baseline_lambda)
+
+        # Baseline diff order
+        self.line_baseline_diff_order = QLineEdit()
+        self.line_baseline_diff_order.setText(str(getattr(self.processor, "baseline_diff_order", BASELINE_DIFF_ORDER_DEFAULT)))
+
+        row_baseline_diff = QHBoxLayout()
+        row_baseline_diff.addWidget(QLabel("Baseline diff order:"))
+        row_baseline_diff.addWidget(self.line_baseline_diff_order)
+        layout.addLayout(row_baseline_diff)
+
+        # Baseline iterations
+        self.line_baseline_iterations = QLineEdit()
+        self.line_baseline_iterations.setText(str(getattr(self.processor, "baseline_iterations", BASELINE_ITERATIONS_DEFAULT)))
+
+        row_baseline_iter = QHBoxLayout()
+        row_baseline_iter.addWidget(QLabel("Baseline iterations:"))
+        row_baseline_iter.addWidget(self.line_baseline_iterations)
+        layout.addLayout(row_baseline_iter)
+
+        # Baseline tolerance
+        self.line_baseline_tolerance = QLineEdit()
+        self.line_baseline_tolerance.setText(str(getattr(self.processor, "baseline_tolerance", BASELINE_TOLERANCE_DEFAULT)))
+
+        row_baseline_tol = QHBoxLayout()
+        row_baseline_tol.addWidget(QLabel("Baseline tolerance:"))
+        row_baseline_tol.addWidget(self.line_baseline_tolerance)
+        layout.addLayout(row_baseline_tol)
+
+        # Checkboxes for enabling/disabling processing steps
+        self.checkbox_dark_subtraction = QCheckBox("Enable dark subtraction")
+        self.checkbox_dark_subtraction.setChecked(getattr(self.processor, "enable_dark_subtraction", ENABLE_DARK_SUBTRACTION_DEFAULT))
+        layout.addWidget(self.checkbox_dark_subtraction)
+
+        self.checkbox_spike_correction = QCheckBox("Enable spike correction")
+        self.checkbox_spike_correction.setChecked(getattr(self.processor, "enable_spike_correction", ENABLE_SPIKE_CORRECTION_DEFAULT))
+        layout.addWidget(self.checkbox_spike_correction)
+
+        self.checkbox_filtering = QCheckBox("Enable filtering")
+        self.checkbox_filtering.setChecked(getattr(self.processor, "enable_filtering", ENABLE_FILTERING_DEFAULT))
+        layout.addWidget(self.checkbox_filtering)
+
+        self.checkbox_baseline_correction = QCheckBox("Enable baseline correction")
+        self.checkbox_baseline_correction.setChecked(getattr(self.processor, "enable_baseline_correction", ENABLE_BASELINE_CORRECTION_DEFAULT))
+        layout.addWidget(self.checkbox_baseline_correction)
+
+        self.checkbox_normalization = QCheckBox("Enable normalization")
+        self.checkbox_normalization.setChecked(getattr(self.processor, "enable_normalization", ENABLE_NORMALIZATION_DEFAULT))
+        layout.addWidget(self.checkbox_normalization)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+    def accept(self):
+        self.processor.set_dark_n_samples(self.line_dark_n_samples.text())
+        self.line_dark_n_samples.setText(str(self.processor.dark_n_samples))
+
+        self.processor.set_spike_window(self.line_spike_window.text())
+        self.line_spike_window.setText(str(self.processor.spike_window))
+
+        self.processor.set_spike_T_multiplier(self.line_spike_T_multiplier.text())
+        self.line_spike_T_multiplier.setText(str(self.processor.spike_T_multiplier))
+
+        self.processor.set_n_spectra(self.line_n_spectra.text())
+        self.line_n_spectra.setText(str(self.processor.n_spectra))
+
+        self.processor.set_filter_window(self.line_filter_window.text())
+        self.line_filter_window.setText(str(self.processor.filter_window))
+
+        self.processor.set_filter_poly_order(self.line_filter_poly_order.text())
+        self.line_filter_poly_order.setText(str(self.processor.filter_poly_order))
+
+        self.processor.set_baseline_lambda(self.line_baseline_lambda.text())
+        self.line_baseline_lambda.setText(str(self.processor.baseline_lambda))
+
+        self.processor.set_baseline_diff_order(self.line_baseline_diff_order.text())
+        self.line_baseline_diff_order.setText(str(self.processor.baseline_diff_order))
+
+        self.processor.set_baseline_iterations(self.line_baseline_iterations.text())
+        self.line_baseline_iterations.setText(str(self.processor.baseline_iterations))
+
+        self.processor.set_baseline_tolerance(self.line_baseline_tolerance.text())
+        self.line_baseline_tolerance.setText(str(self.processor.baseline_tolerance))
+
+        self.processor.set_enable_dark_subtraction(self.checkbox_dark_subtraction.isChecked())
+        self.processor.set_enable_spike_correction(self.checkbox_spike_correction.isChecked())
+        self.processor.set_enable_filtering(self.checkbox_filtering.isChecked())
+        self.processor.set_enable_baseline_correction(self.checkbox_baseline_correction.isChecked())
+        self.processor.set_enable_normalization(self.checkbox_normalization.isChecked())
+
+        super().accept()
+        
+
 class RamanGUI(QMainWindow):
     ###########################################################################
     # CONSTRUCTOR AND INITIALIZATION
@@ -84,13 +256,13 @@ class RamanGUI(QMainWindow):
         cmds_layout.addWidget(self.btn_time)
         
         # Acumulaciones
-        self.spin_accum = QSpinBox()
-        self.spin_accum.setRange(1, 1000)
-        self.spin_accum.setValue(50)
-        self.btn_accum = QPushButton("Set Accumulations")
-        self.btn_accum.clicked.connect(lambda: self.send_cmd('accum'))
-        cmds_layout.addWidget(self.spin_accum)
-        cmds_layout.addWidget(self.btn_accum)
+        #self.spin_accum = QSpinBox()
+        #self.spin_accum.setRange(1, 1000)
+        #self.spin_accum.setValue(50)
+        #self.btn_accum = QPushButton("Set Accumulations")
+        #self.btn_accum.clicked.connect(lambda: self.send_cmd('accum'))
+        #cmds_layout.addWidget(self.spin_accum)
+        #cmds_layout.addWidget(self.btn_accum)
 
         # Skip
         self.spin_skip = QSpinBox()
@@ -122,169 +294,67 @@ class RamanGUI(QMainWindow):
         group_acq.setLayout(acq_layout)
 
         # SIGNAL PROCESSING GROUP
-        group_sig_processing = QGroupBox("Procesamiento en vivo")
-        sig_processing_layout = QVBoxLayout()
-        
-        # Enable/Disable data processing
-        self.lbl_enable_processing = QLabel("Data processing")
-        self.btn_enable_processing = QPushButton("Enable")
-        self.btn_enable_processing.clicked.connect(self.toggle_enable_processing)
-        sig_processing_layout.addWidget(self.lbl_enable_processing)
-        sig_processing_layout.addWidget(self.btn_enable_processing)
-        
-        # Noise label
-        self.lbl_noise = QLabel("Noise: -")
-        sig_processing_layout.addWidget(self.lbl_noise)
+        group_processing = QGroupBox("Processing Configuration")
+        processing_layout = QVBoxLayout()
 
-        # Baseline correction (0 is disabled)
-        self.lbl_baseline = QLabel("Baseline λ")
-        self.baseline_help_button = QPushButton()
-        self.baseline_help_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
-        )
-        self.baseline_help_button.setFixedSize(22, 22)
-        self.baseline_help_button.clicked.connect(lambda: show_baseline_help(self))
+        self.lbl_dark_n_samples = QLabel()
 
-        self.processor.set_baseline_lambda(10000)
-        self.edit_baseline_lambda = QLineEdit(
-            f"{self.processor.baseline_lambda:.1e}"
-        )
+        self.lbl_spike_window = QLabel()
+        self.lbl_spike_T_multiplier = QLabel()
 
-        self.edit_baseline_lambda.editingFinished.connect(
-            self.update_baseline
-        )
+        self.lbl_n_spectra = QLabel()
 
-        baseline_layout = QHBoxLayout()
-        baseline_layout.addWidget(self.edit_baseline_lambda)
-        baseline_layout.addWidget(self.baseline_help_button)
+        self.lbl_filter_window = QLabel()
+        self.lbl_filter_poly_order = QLabel()
 
-        sig_processing_layout.addWidget(self.lbl_baseline)
-        sig_processing_layout.addLayout(baseline_layout)
+        self.lbl_baseline_lambda = QLabel()
+        self.lbl_baseline_diff_order = QLabel()
+        self.lbl_baseline_iterations = QLabel()
+        self.lbl_baseline_tolerance = QLabel()
 
-        # Smoothing
-        self.lbl_smoothing = QLabel("Smoothing")
-        self.smoothing_help_button = QPushButton()
-        self.smoothing_help_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
-        )
-        self.smoothing_help_button.setFixedSize(22, 22)
-        self.smoothing_help_button.clicked.connect(lambda: show_smoothing_help(self))
+        self.lbl_enable_dark_subtraction = QLabel()
+        self.lbl_enable_spike_correction = QLabel()
+        self.lbl_enable_filtering = QLabel()
+        self.lbl_enable_baseline_correction = QLabel()
+        self.lbl_enable_normalization = QLabel()
 
-        # (Window length)
-        self.processor.set_smoothing_wd(2)
-        self.edit_smoothing_wd = QLineEdit(str(self.processor.smoothing_wd))
+        processing_layout.addWidget(self.lbl_dark_n_samples)
+        processing_layout.addWidget(self.lbl_spike_window)
+        processing_layout.addWidget(self.lbl_spike_T_multiplier)
+        processing_layout.addWidget(self.lbl_n_spectra)
 
-        self.edit_smoothing_wd.editingFinished.connect(
-            self.update_smoothing_wd
-        )
+        processing_layout.addWidget(self.lbl_filter_window)
+        processing_layout.addWidget(self.lbl_filter_poly_order)
 
-        # (Polynomial order)
-        self.processor.set_smoothing_poly(1)
-        self.edit_smoothing_poly = QLineEdit(str(self.processor.smoothing_poly))
+        processing_layout.addWidget(self.lbl_baseline_lambda)
+        processing_layout.addWidget(self.lbl_baseline_diff_order)
+        processing_layout.addWidget(self.lbl_baseline_iterations)
+        processing_layout.addWidget(self.lbl_baseline_tolerance)
 
-        self.edit_smoothing_poly.editingFinished.connect(
-            self.update_smoothing_poly
-        )
+        processing_layout.addWidget(self.lbl_enable_dark_subtraction)
+        processing_layout.addWidget(self.lbl_enable_spike_correction)
+        processing_layout.addWidget(self.lbl_enable_filtering)
+        processing_layout.addWidget(self.lbl_enable_baseline_correction)
+        processing_layout.addWidget(self.lbl_enable_normalization)
 
-        smoothing_layout = QHBoxLayout()
-        smoothing_layout.addWidget(QLabel("Window:"))
-        smoothing_layout.addWidget(self.edit_smoothing_wd)
-        smoothing_layout.addWidget(QLabel("Poly:"))
-        smoothing_layout.addWidget(self.edit_smoothing_poly)
-        smoothing_layout.addWidget(self.smoothing_help_button)
+        self.update_processing_config_labels()
 
-        sig_processing_layout.addWidget(self.lbl_smoothing)
-        sig_processing_layout.addLayout(smoothing_layout)
+        self.btn_processing_config = QPushButton("Settings")
+        self.btn_processing_config.clicked.connect(self.open_processing_config)
+        processing_layout.addWidget(self.btn_processing_config)
 
-        # Peak height factor
-        self.lbl_peak_height_factor = QLabel(f"Height factor")
+        self.btn_delete_config = QPushButton("Delete Configuration")
+        self.btn_delete_config.clicked.connect(self.delete_configuration)
+        processing_layout.addWidget(self.btn_delete_config)
 
-        self.height_factor_help_button = QPushButton()
-        self.height_factor_help_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
-        )
-        self.height_factor_help_button.setFixedSize(22, 22)
-        self.height_factor_help_button.clicked.connect(lambda: show_height_factor_help(self))
-
-        self.processor.set_peak_height_factor(1)
-        self.edit_peak_height_factor = QLineEdit(str(self.processor.peak_height_factor))
-
-        self.edit_peak_height_factor.editingFinished.connect(
-            self.update_peak_height_factor
-        )
-
-        height_factor_layout = QHBoxLayout()
-        height_factor_layout.addWidget(self.edit_peak_height_factor)
-        height_factor_layout.addWidget(self.height_factor_help_button)
-
-        sig_processing_layout.addWidget(self.lbl_peak_height_factor)
-        sig_processing_layout.addLayout(height_factor_layout)
-
-        # Prominence
-        self.lbl_prominence = QLabel(f"Prominence factor")
-
-        self.prominence_help_button = QPushButton()
-        self.prominence_help_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
-        )
-        self.prominence_help_button.setFixedSize(22, 22)
-        self.prominence_help_button.clicked.connect(lambda: show_prominence_factor_help(self))
-
-        self.processor.set_peak_prominence(1)
-        self.edit_peak_prominence = QLineEdit(str(self.processor.peak_prominence))
-
-        self.edit_peak_prominence.editingFinished.connect(
-            self.update_peak_prominence
-        )
-
-        prominence_layout = QHBoxLayout()
-        prominence_layout.addWidget(self.edit_peak_prominence)
-        prominence_layout.addWidget(self.prominence_help_button)
-
-        sig_processing_layout.addWidget(self.lbl_prominence)
-        sig_processing_layout.addLayout(prominence_layout)
-
-        # Min peak distance
-        self.lbl_min_distance = QLabel(f"Min peak distance")
-        self.min_distance_help_button = QPushButton()
-        self.min_distance_help_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
-        )
-        self.min_distance_help_button.setFixedSize(22, 22)
-        self.min_distance_help_button.clicked.connect(lambda: show_minmum_peak_distance_help(self))
-
-        self.processor.set_peak_min_distance(1)
-        self.edit_peak_min_distance = QLineEdit(str(self.processor.peak_min_distance))
-
-        self.edit_peak_min_distance.editingFinished.connect(
-            self.update_peak_min_distance
-        )
-
-        min_distance_layout = QHBoxLayout()
-        min_distance_layout.addWidget(self.edit_peak_min_distance)
-        min_distance_layout.addWidget(self.min_distance_help_button)
-
-        sig_processing_layout.addWidget(self.lbl_min_distance)
-        sig_processing_layout.addLayout(min_distance_layout)
-
-        # Find peaks
-        self.btn_find_peaks = QPushButton("Find peaks")
-        self.btn_find_peaks.clicked.connect(self.toggle_find_peaks)
-        sig_processing_layout.addWidget(self.btn_find_peaks)
-
-        # Show peak labels
-        self.btn_peak_labels = QPushButton("Show peak labels")
-        self.btn_peak_labels.clicked.connect(self.toggle_peak_labels)
-        sig_processing_layout.addWidget(self.btn_peak_labels)
-        
         # Group
-        group_sig_processing.setLayout(sig_processing_layout)
+        group_processing.setLayout(processing_layout)
 
         # Construct the left panel
         control_layout.addWidget(group_conn)
         control_layout.addWidget(group_cmds)
         control_layout.addWidget(group_acq)
-        control_layout.addWidget(group_sig_processing)
+        control_layout.addWidget(group_processing)
         control_layout.addStretch()
 
         ##########################################################################
@@ -310,6 +380,73 @@ class RamanGUI(QMainWindow):
 
         main_layout.addWidget(control_widget)
         main_layout.addWidget(self.plot_widget)
+
+    def delete_configuration(self):
+        self.processor.delete_config()
+        self.update_processing_config_labels()
+        QMessageBox.information(self, "Configuration Deleted", "The configuration file has been deleted and defaults have been restored.")
+
+    def update_processing_config_labels(self):
+        self.lbl_dark_n_samples.setText(
+            f"Dark samples: {self.processor.dark_n_samples}"
+        )
+        self.lbl_spike_window.setText(
+            f"Spike window: {self.processor.spike_window}"
+        )
+        self.lbl_spike_T_multiplier.setText(
+            f"Spike T multiplier: {self.processor.spike_T_multiplier}"
+        )
+        self.lbl_n_spectra.setText(
+            f"Number of spectra: {self.processor.n_spectra}"
+        )
+
+        self.lbl_filter_window.setText(
+            f"Filter window: {self.processor.filter_window}"
+        )
+        self.lbl_filter_poly_order.setText(
+            f"Filter polynomial order: {self.processor.filter_poly_order}"
+        )
+
+        self.lbl_baseline_lambda.setText(
+            f"Baseline lambda: {self.processor.baseline_lambda:.2e}"
+        )
+        self.lbl_baseline_diff_order.setText(
+            f"Baseline diff order: {self.processor.baseline_diff_order}"
+        )
+        self.lbl_baseline_iterations.setText(
+            f"Baseline iterations: {self.processor.baseline_iterations}"
+        )
+        self.lbl_baseline_tolerance.setText(
+            f"Baseline tolerance: {self.processor.baseline_tolerance:.2e}"
+        )
+
+        self.lbl_enable_dark_subtraction.setText(
+            f"Dark subtraction: {self._enabled_text(self.processor.enable_dark_subtraction)}"
+        )
+        self.lbl_enable_spike_correction.setText(
+            f"Spike correction: {self._enabled_text(self.processor.enable_spike_correction)}"
+        )
+        self.lbl_enable_filtering.setText(
+            f"Filtering: {self._enabled_text(self.processor.enable_filtering)}"
+        )
+        self.lbl_enable_baseline_correction.setText(
+            f"Baseline correction: {self._enabled_text(self.processor.enable_baseline_correction)}"
+        )
+        self.lbl_enable_normalization.setText(
+            f"Normalization: {self._enabled_text(self.processor.enable_normalization)}"
+        )
+
+    @staticmethod
+    def _enabled_text(enabled):
+        return "Enabled" if enabled else "Disabled"
+    ############################################################################
+    def open_processing_config(self):
+        dialog = ProcessingConfigDialog(self.processor, self)
+
+        if dialog.exec() == QDialog.Accepted:
+            self.update_processing_config_labels()
+            self.processor.spectra_buffer.clear()  # Clear the buffer to avoid using old data
+            self.processor.save_config()
 
     ###########################################################################
     # DEVICE CONNECTION
@@ -362,12 +499,12 @@ class RamanGUI(QMainWindow):
         if not self.worker.running:
             # Arrancar
             self.worker.start()
-            self.btn_start.setText("⏸ Stop Reading")
+            self.btn_start.setText("Stop Reading")
             self.btn_start.setStyleSheet("background-color: #ffcccc;")
         else:
             # Detener
             self.worker.stop()
-            self.btn_start.setText("▶ Start Reading")
+            self.btn_start.setText("Start Reading")
             self.btn_start.setStyleSheet("background-color: #ccffcc;")
 
     # ENABLE/DISABLE DATA PROCESSING BUTTON
@@ -380,7 +517,7 @@ class RamanGUI(QMainWindow):
             self.btn_enable_processing.setText("Enable")
 
         self.processor.set_enable_processing(enabled)
-    
+
     # BASELINE
     def update_baseline(self):
         val = float(self.edit_baseline_lambda.text())
@@ -448,18 +585,16 @@ class RamanGUI(QMainWindow):
 
     # UPDATE PLOT
     @Slot(np.ndarray)
-    def update_plot(self, data):
-        processed_data, _ = self.processor.process(data)
-
+    def update_plot(self, data = None):
+        if data is None:
+            return
+        
+        processed_data, _, _, _ = self.processor.process(data)
+        if processed_data is None:
+            return
+        
         self.processor.last_processed_data = processed_data
         self.curve.setData(processed_data)
-
-        self.lbl_noise.setText(
-            f"Noise: {self.processor.last_noise:.2f} ADC counts"
-        )
-
-        if self.peaks_enabled:
-            self.find_and_plot_peaks()
 
     # FIND AND PLOT PEAKS
     def find_and_plot_peaks(self):
