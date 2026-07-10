@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QComboBox, QDi
                                QSpinBox, QGroupBox, QMessageBox, QLineEdit, QDialogButtonBox)
 from PySide6.QtCore import Slot
 from signalprocessor import SignalProcessor
-from spectrometer import SpectrometerDriver
+from spectrometer import SpectrometerDriver, SpectrometerDriverMock
 from adquisition import AcquisitionThread
 from help_messages import *
 import pyqtgraph as pg
@@ -291,6 +291,15 @@ class RamanGUI(QMainWindow):
         self.btn_start.clicked.connect(self.toggle_acquisition)
         self.btn_start.setEnabled(False) # Deshabilitado hasta conectar
         acq_layout.addWidget(self.btn_start)
+
+        self.btn_dark = QPushButton("Capture Dark")
+        self.btn_dark.setEnabled(False)
+        self.btn_dark.clicked.connect(self.start_dark_capture)
+
+        acq_layout.addWidget(self.btn_dark)
+        self.lbl_dark_status = QLabel("Dark: not acquired")
+        acq_layout.addWidget(self.lbl_dark_status)
+
         group_acq.setLayout(acq_layout)
 
         # SIGNAL PROCESSING GROUP
@@ -441,6 +450,14 @@ class RamanGUI(QMainWindow):
         return "Enabled" if enabled else "Disabled"
     ############################################################################
     def open_processing_config(self):
+        if self.worker and self.worker.capturing_dark:
+            QMessageBox.warning(
+                self,
+                "Dark acquisition",
+                "Wait until the dark acquisition is complete.",
+            )
+            return
+        
         dialog = ProcessingConfigDialog(self.processor, self)
 
         if dialog.exec() == QDialog.Accepted:
@@ -458,16 +475,28 @@ class RamanGUI(QMainWindow):
             return
         
         try:
-            self.dev = SpectrometerDriver(port=port)
+            if port == "__MOCK__":
+                self.dev = SpectrometerDriverMock()
+            else:
+                self.dev = SpectrometerDriver(port=port, timeout=0.25)
             self.btn_connect.setText("Connected")
             self.btn_connect.setStyleSheet("background-color: #ccffcc;")
             self.btn_connect.setEnabled(False)
             self.port_input.setEnabled(False)
             self.btn_start.setEnabled(True)
+            self.btn_start.setEnabled(True)
+            self.btn_dark.setEnabled(True)
             
             # Inicializar el hilo (pero no arrancarlo aún)
-            self.worker = AcquisitionThread(self.dev)
+            self.worker = AcquisitionThread(
+                driver=self.dev,
+                processor=self.processor,
+            )
+
             self.worker.data_ready.connect(self.update_plot)
+            self.worker.dark_progress.connect(self.update_dark_progress)
+            self.worker.dark_finished.connect(self.dark_capture_finished)
+            self.worker.acquisition_error.connect(self.show_acquisition_error)
             
         except Exception as e:
             QMessageBox.critical(self, "Connection Error", f"Could not connect to {port}.\n\n{str(e)}")
@@ -490,22 +519,94 @@ class RamanGUI(QMainWindow):
             val = self.spin_skip.value()
             self.dev.set_skip_counter(val)
 
-    ############################################################################
+    def start_dark_capture(self):
+        if self.worker is None:
+            return
+
+        if not self.worker.isRunning():
+            QMessageBox.warning(
+                self,
+                "Dark acquisition",
+                "Start the acquisition before capturing the dark spectrum.",
+            )
+            return
+
+        if self.worker.capturing_dark:
+            return
+
+        self.processor.spectra_buffer.clear()
+
+        self.worker.start_dark_capture()
+
+        self.btn_dark.setEnabled(False)
+        self.btn_start.setEnabled(False)
+
+        self.lbl_dark_status.setText(
+            f"Dark: 0 / {self.processor.dark_n_samples}"
+        )
+
+    def update_dark_progress(self, current, total):
+        self.lbl_dark_status.setText(
+            f"Dark: {current} / {total}"
+        )
+
+    def dark_capture_finished(self):
+        self.lbl_dark_status.setText(
+            f"Dark acquired: {len(self.processor.dark_buffer)} samples"
+        )
+
+        self.btn_dark.setEnabled(True)
+        self.btn_start.setEnabled(True)
+
+        QMessageBox.information(
+            self,
+            "Dark acquisition",
+            (
+                f"Dark spectrum acquired successfully.\n\n"
+                f"Samples: {len(self.processor.dark_buffer)}"
+            ),
+        )
+        ############################################################################
     # UPDATERS
     ############################################################################
     # ADQUISITION BUTTON
+    def show_acquisition_error(self, message):
+        print(f"Acquisition error: {message}")
 
     def toggle_acquisition(self):
-        if not self.worker.running:
-            # Arrancar
+        if self.worker is None:
+            return
+
+        if not self.worker.isRunning():
+            self.processor.spectra_buffer.clear()
+
             self.worker.start()
+
             self.btn_start.setText("Stop Reading")
             self.btn_start.setStyleSheet("background-color: #ffcccc;")
+
+            self.btn_processing_config.setEnabled(False)
+            self.btn_delete_config.setEnabled(False)
+
         else:
-            # Detener
             self.worker.stop()
+
+            self.processor.spectra_buffer.clear()
+
             self.btn_start.setText("Start Reading")
             self.btn_start.setStyleSheet("background-color: #ccffcc;")
+
+            self.btn_processing_config.setEnabled(True)
+            self.btn_delete_config.setEnabled(True)
+
+
+    @Slot(str)
+    def on_acquisition_error(self, message):
+        self.btn_start.setText("Start Reading")
+        self.btn_start.setStyleSheet("background-color: #ccffcc;")
+        self.btn_processing_config.setEnabled(True)
+        self.btn_delete_config.setEnabled(True)
+        QMessageBox.critical(self, "Acquisition error", message)
 
     # ENABLE/DISABLE DATA PROCESSING BUTTON
     def toggle_enable_processing(self):
@@ -585,16 +686,15 @@ class RamanGUI(QMainWindow):
 
     # UPDATE PLOT
     @Slot(np.ndarray)
-    def update_plot(self, data = None):
-        if data is None:
-            return
-        
-        processed_data, _, _, _ = self.processor.process(data)
+    def update_plot(self, processed_data):
         if processed_data is None:
             return
-        
+
         self.processor.last_processed_data = processed_data
         self.curve.setData(processed_data)
+
+        if self.peaks_enabled:
+            self.find_and_plot_peaks()
 
     # FIND AND PLOT PEAKS
     def find_and_plot_peaks(self):
@@ -632,11 +732,9 @@ class RamanGUI(QMainWindow):
 
         ports = list(list_ports.comports())
 
-        if not ports:
-            self.port_input.addItem("No serial devices found", None)
-            self.btn_connect.setEnabled(False)
-            return
-        
+        # The mock must always be available, even with no serial hardware.
+        self.port_input.addItem("Mock (synthetic spectrum)", "__MOCK__")
+
         for port in ports:
             self.port_input.addItem(f"{port.device} ({port.description})", port.device)
 

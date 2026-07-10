@@ -28,8 +28,16 @@ class SpectrometerDriver:
             print(f"Error connecting to port: {e}")
             raise e
 
+    def cancel_read(self):
+        if self.ser and self.ser.is_open and hasattr(self.ser, "cancel_read"):
+            try:
+                self.ser.cancel_read()
+            except (OSError, serial.SerialException):
+                pass
+
     def close(self):
         if self.ser and self.ser.is_open:
+            self.cancel_read()
             self.ser.close()
             print("Connection closed.")
 
@@ -145,17 +153,21 @@ class SpectrometerDriver:
 ##### Mock class for testing without hardware
 from synthetic_spectra import generate_synthetic_raman_raw
 class SpectrometerDriverMock:
-    def __init__(self, port="COM7", baud=921600, timeout=2):
+    def __init__(self, port="MOCK", baud=921600, timeout=2):
         self.int_time_us = 100
         self.n_accum = 50
         self.skip_count = 0
         self.ser = None
+        self._frame_index = 0
         
         try:
             print(f"Mock connection to {port} @ {baud}")
         except Exception as e:
             print(f"Error connecting to port: {e}")
             raise e
+
+    def cancel_read(self):
+        pass
 
     def close(self):
         print("Connection closed.")
@@ -184,7 +196,7 @@ class SpectrometerDriverMock:
 
     def read_frame(self):
         _, pixels_raw, _, _ = generate_synthetic_raman_raw(
-            seed=42,
+            seed=42 + self._frame_index,
             hot_pixel_prob=0.0,
             dead_pixel_prob=0.0,
             cosmic_ray_prob=0.0,
@@ -192,4 +204,5 @@ class SpectrometerDriverMock:
             read_noise_std=10,
             shot_noise_scale=0.3,
         )
+        self._frame_index += 1
         return pixels_raw

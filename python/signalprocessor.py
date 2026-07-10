@@ -1,6 +1,7 @@
 import numpy as np
 from pybaselines import Baseline
 from scipy.signal import savgol_filter
+from scipy.ndimage import median_filter
 from pathlib import Path
 import json
 from scipy.signal import find_peaks
@@ -85,6 +86,7 @@ class SignalProcessor:
 
         self.dark_buffer = []
         self.spectra_buffer = []
+        self.last_processed_data = None
 
     ####################################################################################
     # SETTERS
@@ -234,9 +236,8 @@ class SignalProcessor:
         if self.enable_baseline_correction:
             processed = self.apply_baseline_correction(processed)
 
+        # Peak detection is requested explicitly by the GUI, not here.
         peaks = None
-        if self.enable_peak_detection:
-            peaks = self.detect_peaks(processed, noise_std=std)
 
         if self.enable_normalization:
             processed = self.normalize(processed)
@@ -262,38 +263,39 @@ class SignalProcessor:
     # APLIERS
     ##################################################################################
     def subtract_dark(self, data):
-        dark = np.mean(self.dark_buffer, axis=0)
-        corrected = np.clip(data.astype(float) - dark.astype(float), 0, None)
+        if len(self.dark_buffer) == 0:
+            return np.asarray(data, dtype=float).copy()
 
-        return corrected
+        dark = np.mean(
+            np.asarray(self.dark_buffer, dtype=float),
+            axis=0,
+        )
+
+        corrected = (
+            np.asarray(data, dtype=float)
+            - dark
+        )
+
+        return np.clip(corrected, 0, None)
     
     def correct_spikes(self, data):
-        y = np.asarray(data, dtype=float).copy()
+        # Vectorized median-based despiking. The previous Python loop computed
+        # thousands of medians per frame and could monopolize the GUI.
+        y = np.asarray(data, dtype=float)
+        local_median = median_filter(y, size=self.spike_window, mode="nearest")
+        residual = y - local_median
+
+        abs_residual = np.abs(residual)
+        local_mad = median_filter(abs_residual, size=self.spike_window, mode="nearest")
+        sigma = 1.4826 * local_mad
+
+        threshold = self.spike_T_multiplier * sigma
+        mask = (sigma > 0) & (abs_residual > threshold)
+
         corrected = y.copy()
-
-        window = self.spike_window
-        k = window // 2
-
-        # No se evaluan los bordes
-        for i in range(k, len(y) - k):
-            local = y[i - k: i + k + 1]
-            neighbors = np.concatenate((local[:k], local[k + 1:])) # excluyo el punto central
-
-            local_median = np.median(neighbors)
-            residual = y[i] - local_median
-
-            neighbor_residuals = neighbors - local_median
-            mad = np.median(np.abs(neighbor_residuals - np.median(neighbor_residuals)))
-
-            if mad == 0:
-                continue
-
-            sigma_r = 1.4826 * mad
-            if abs(residual) > self.spike_T_multiplier * sigma_r:
-                corrected[i] = local_median
-
+        corrected[mask] = local_median[mask]
         return corrected
-    
+
     def apply_smoothing(self, data):
         data_ = data.astype(float)
         smoothed = savgol_filter(
@@ -304,6 +306,15 @@ class SignalProcessor:
 
         return smoothed
     
+    def normalize(self, data):
+        data_ = np.asarray(data, dtype=float)
+        minimum = np.min(data_)
+        maximum = np.max(data_)
+        span = maximum - minimum
+        if span == 0:
+            return np.zeros_like(data_)
+        return (data_ - minimum) / span
+
     def apply_baseline_correction(self, data):        
         data_ = data.astype(float)
 
@@ -373,3 +384,5 @@ class SignalProcessor:
             print(f"Configuration file {path} does not exist.")
 
         self.__init__()
+
+        

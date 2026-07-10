@@ -1,0 +1,17 @@
+{
+    "dark_n_samples": 100,
+    "spike_window": 5,
+    "spike_T_multiplier": 1.0,
+    "n_spectra": 1,
+    "filter_window": 3,
+    "filter_poly_order": 1,
+    "baseline_lambda": 100000.0,
+    "baseline_diff_order": 2,
+    "baseline_iterations": 50,
+    "baseline_tolerance": 0.001,
+    "enable_dark_subtraction": true,
+    "enable_spike_correction": false,
+    "enable_filtering": false,
+    "enable_baseline_correction": false,
+    "enable_normalization": false
+}
