@@ -279,20 +279,27 @@ class SignalProcessor:
         return np.clip(corrected, 0, None)
     
     def correct_spikes(self, data):
-        # Vectorized median-based despiking. The previous Python loop computed
-        # thousands of medians per frame and could monopolize the GUI.
         y = np.asarray(data, dtype=float)
+        # median_filter returns an array of the same shape as the input, with the median value computed over a local window defined by 'size'.
+        # "nearest" mode means that for positions outside the array, the nearest edge value is used ([? ? 10 ...] == [10 10 10 ...]).
         local_median = median_filter(y, size=self.spike_window, mode="nearest")
+
+        # Compute the residual (difference between the original signal and the local median)
         residual = y - local_median
 
         abs_residual = np.abs(residual)
+        # MAD = median(|r - median(r)|)
         local_mad = median_filter(abs_residual, size=self.spike_window, mode="nearest")
         sigma = 1.4826 * local_mad
 
+        # Calculate threshold as defined (T * sigma)
         threshold = self.spike_T_multiplier * sigma
+
+        # Mark the positions where the absolute residual exceeds the threshold and sigma is greater than zero
         mask = (sigma > 0) & (abs_residual > threshold)
 
         corrected = y.copy()
+        # Only replace the values at the positions marked by the mask with the local median values
         corrected[mask] = local_median[mask]
         return corrected
 
