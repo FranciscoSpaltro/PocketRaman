@@ -207,6 +207,8 @@ void process_instruction(){
 
 		case TOGGLE_LED:{
 			HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+			processed = 1;
+			break;
 		}
 
 		default:

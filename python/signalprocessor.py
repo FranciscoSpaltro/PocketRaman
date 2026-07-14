@@ -8,6 +8,7 @@ from scipy.signal import find_peaks
 
 CCD_PIXELS = 3694
 USEFUL_CCD_PIXELS = 3694
+ADC_MAX = 4095
 
 DARK_N_SAMPLES_MAX = 1000
 DARK_N_SAMPLES_MIN = 1
@@ -206,7 +207,7 @@ class SignalProcessor:
     # PROCESSING
     ####################################################################################
     def process_single_spectrum(self, data):
-        processed = data.copy()
+        processed = ADC_MAX - data.copy()
 
         if self.enable_dark_subtraction:
             processed = self.subtract_dark(processed)
