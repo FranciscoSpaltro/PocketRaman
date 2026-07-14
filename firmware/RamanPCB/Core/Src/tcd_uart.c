@@ -205,6 +205,10 @@ void process_instruction(){
 			break;
 		}
 
+		case TOGGLE_LED:{
+			HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+		}
+
 		default:
 			break;
 	}

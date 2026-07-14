@@ -274,4 +274,3 @@ VP_TIM5_VS_ClockSourceITR.Signal=TIM5_VS_ClockSourceITR
 VP_TIM5_VS_ControllerModeClock.Mode=Clock Mode
 VP_TIM5_VS_ControllerModeClock.Signal=TIM5_VS_ControllerModeClock
 board=custom
-isbadioc=false

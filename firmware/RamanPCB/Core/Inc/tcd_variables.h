@@ -12,6 +12,7 @@
 #define DATA_SENDING									0xF003
 #define SET_NUMBER_OF_ACCUMULATIONS						0xF004
 #define SET_SKIP_COUNTER								0xF005
+#define TOGGLE_LED										0xF006
 
 #define ACK_COMMAND										0xFF46
 

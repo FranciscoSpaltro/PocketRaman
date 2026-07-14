@@ -119,7 +119,10 @@ int main(void)
   MX_TIM5_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-  uint32_t ultimo_blink = 0;
+  //uint32_t ultimo_blink = 0;
+
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
 
   calculate_times(100);
   build_SH_table();
@@ -136,10 +139,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  /*
 	  if (HAL_GetTick() - ultimo_blink >= 1000) {
 		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
 		  ultimo_blink = HAL_GetTick();
 	  }
+	  */
+
+
 
 	  if(process_instruction_flag == 1){
 		  HAL_ADC_Stop_DMA(&hadc1);

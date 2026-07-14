@@ -11,6 +11,7 @@ class SpectrometerDriver:
     CMD_DATA_SENDING        = 0xF003
     CMD_SET_ACCUM           = 0xF004
     CMD_SET_SKIP_COUNTER    = 0xF005
+    CMD_TOGGLE_LED          = 0xF006
     CMD_ACK                 = 0xFF46
     CCD_PIXELS = 3694
 
@@ -78,6 +79,10 @@ class SpectrometerDriver:
         print(f"Set skip counter: {skip_count}")
         self._send_command(self.CMD_SET_SKIP_COUNTER, skip_count)
         self.skip_count = skip_count
+
+    def toggle_led(self):
+        print("Toggling LED...")
+        self._send_command(self.CMD_TOGGLE_LED)
 
     def read_frame(self):
         if not self.ser or not self.ser.is_open:
@@ -193,6 +198,10 @@ class SpectrometerDriverMock:
     def set_skip_counter(self, skip_count):
         print(f"Set skip counter: {skip_count}")
         self.skip_count = skip_count
+
+    def toggle_led(self):
+        print("Toggling LED...")
+
 
     def read_frame(self):
         _, pixels_raw, _, _ = generate_synthetic_raman_raw(

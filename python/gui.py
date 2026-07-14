@@ -279,6 +279,11 @@ class RamanGUI(QMainWindow):
         self.btn_reset.clicked.connect(lambda: self.send_cmd('reset'))
         cmds_layout.addWidget(self.btn_reset)
 
+        # Toggle LED
+        self.btn_toggle_led = QPushButton("Toggle LED")
+        self.btn_toggle_led.clicked.connect(lambda: self.send_cmd('toggle_led'))
+        cmds_layout.addWidget(self.btn_toggle_led)
+
         # GROUP    
         group_cmds.setLayout(cmds_layout)
 
@@ -286,7 +291,7 @@ class RamanGUI(QMainWindow):
         # ADQUISITION GROUP
         group_acq = QGroupBox("Continuous Acquisition")
         acq_layout = QVBoxLayout()
-        self.btn_start = QPushButton("▶ Start Reading")
+        self.btn_start = QPushButton("Start Reading")
         self.btn_start.setStyleSheet("background-color: #ccffcc;")
         self.btn_start.clicked.connect(self.toggle_acquisition)
         self.btn_start.setEnabled(False) # Deshabilitado hasta conectar
