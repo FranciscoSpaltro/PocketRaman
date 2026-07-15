@@ -4,7 +4,7 @@ from scipy.signal import savgol_filter
 from scipy.ndimage import median_filter
 from pathlib import Path
 import json
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks as scipy_find_peaks
 
 CCD_PIXELS = 3694
 USEFUL_CCD_PIXELS = 3694
@@ -52,6 +52,18 @@ BASELINE_TOLERANCE_MAX = 1
 BASELINE_TOLERANCE_MIN = 1e-9
 BASELINE_TOLERANCE_DEFAULT = 1e-3 # fixed
 
+PEAK_PROMINENCE_FACTOR_MIN = 0.0
+PEAK_PROMINENCE_FACTOR_MAX = 100.0
+PEAK_PROMINENCE_FACTOR_DEFAULT = 5.0
+
+PEAK_MIN_DISTANCE_MIN = 1
+PEAK_MIN_DISTANCE_MAX = USEFUL_CCD_PIXELS
+PEAK_MIN_DISTANCE_DEFAULT = 3
+
+PEAK_MIN_WIDTH_MIN = 0.0
+PEAK_MIN_WIDTH_MAX = USEFUL_CCD_PIXELS
+PEAK_MIN_WIDTH_DEFAULT = 1.0
+
 ENABLE_DARK_SUBTRACTION_DEFAULT = False
 ENABLE_SPIKE_CORRECTION_DEFAULT = False
 ENABLE_FILTERING_DEFAULT = False
@@ -77,6 +89,10 @@ class SignalProcessor:
         self.baseline_iterations = BASELINE_ITERATIONS_DEFAULT
         self.baseline_tolerance = BASELINE_TOLERANCE_DEFAULT
 
+        self.peak_prominence_factor = PEAK_PROMINENCE_FACTOR_DEFAULT
+        self.peak_min_distance = PEAK_MIN_DISTANCE_DEFAULT
+        self.peak_min_width = PEAK_MIN_WIDTH_DEFAULT
+
         self.enable_dark_subtraction = ENABLE_DARK_SUBTRACTION_DEFAULT
         self.enable_spike_correction = ENABLE_SPIKE_CORRECTION_DEFAULT
         self.enable_filtering = ENABLE_FILTERING_DEFAULT
@@ -86,6 +102,7 @@ class SignalProcessor:
         self.load_config()
 
         self.dark_buffer = []
+        self.dark_average = None
         self.spectra_buffer = []
         self.last_processed_data = None
 
@@ -177,6 +194,56 @@ class SignalProcessor:
         self.enable_normalization = bool(value)
         print(f"Enable normalization = {self.enable_normalization}")
 
+    def set_peak_prominence_factor(self, value):
+        val = float(value)
+        val = min(
+            max(val, PEAK_PROMINENCE_FACTOR_MIN),
+            PEAK_PROMINENCE_FACTOR_MAX,
+        )
+
+        self.peak_prominence_factor = val
+        print(f"Peak prominence factor = {val:.2f} sigma")
+
+
+    def set_peak_min_distance(self, value):
+        val = int(value)
+        val = min(
+            max(val, PEAK_MIN_DISTANCE_MIN),
+            PEAK_MIN_DISTANCE_MAX,
+        )
+
+        self.peak_min_distance = val
+        print(f"Peak minimum distance = {val} pixels")
+
+
+    def set_peak_min_width(self, value):
+        val = float(value)
+        val = min(
+            max(val, PEAK_MIN_WIDTH_MIN),
+            PEAK_MIN_WIDTH_MAX,
+        )
+
+        self.peak_min_width = val
+        print(f"Peak minimum width = {val:.2f} pixels")
+
+    def estimate_noise(self, data):
+        y = np.asarray(data, dtype=float)
+
+        if y.size < 2:
+            return 0.0
+
+        differences = np.diff(y)
+
+        median_difference = np.median(differences)
+
+        mad_difference = np.median(
+            np.abs(differences - median_difference)
+        )
+
+        sigma = mad_difference / (0.67448975 * np.sqrt(2.0))
+
+        return float(sigma)
+
     def save_config(self, filename="config.json"):
         config = {
             "dark_n_samples": self.dark_n_samples,
@@ -194,6 +261,9 @@ class SignalProcessor:
             "enable_filtering": self.enable_filtering,
             "enable_baseline_correction": self.enable_baseline_correction,
             "enable_normalization": self.enable_normalization,
+            "peak_prominence_factor": self.peak_prominence_factor,
+            "peak_min_distance": self.peak_min_distance,
+            "peak_min_width": self.peak_min_width,
         }
 
         path = Path(__file__).parent / filename
@@ -207,10 +277,12 @@ class SignalProcessor:
     # PROCESSING
     ####################################################################################
     def process_single_spectrum(self, data):
-        processed = ADC_MAX - data.copy()
+        raw = np.asarray(data, dtype=float)
 
         if self.enable_dark_subtraction:
-            processed = self.subtract_dark(processed)
+            processed = self.subtract_dark(raw)
+        else:
+            processed = ADC_MAX - raw
 
         if self.enable_spike_correction:
             processed = self.correct_spikes(processed)
@@ -263,19 +335,27 @@ class SignalProcessor:
     ##################################################################################
     # APLIERS
     ##################################################################################
-    def subtract_dark(self, data):
+    def compute_dark_average(self):
         if len(self.dark_buffer) == 0:
-            return np.asarray(data, dtype=float).copy()
+            self.dark_average = None
+            return None
 
-        dark = np.mean(
+        self.dark_average = np.mean(
             np.asarray(self.dark_buffer, dtype=float),
             axis=0,
         )
 
-        corrected = (
-            np.asarray(data, dtype=float)
-            - dark
-        )
+        self.dark_buffer.clear()
+
+        return self.dark_average
+    
+    def subtract_dark(self, data):
+        y = np.asarray(data, dtype=float)
+
+        if self.dark_average is None:
+            return ADC_MAX - y
+
+        corrected = self.dark_average - y
 
         return np.clip(corrected, 0, None)
     
@@ -333,20 +413,21 @@ class SignalProcessor:
 
         return corrected
 
-    def find_peaks(self, data):
-        data_ = data.astype(float)
+    def detect_peaks(self, data):
+        y = np.asarray(data, dtype=float)
 
-        noise = self.update_noise(data_)
+        if y.size == 0:
+            return np.array([], dtype=int)
 
-        height_threshold = self.peak_height_factor * noise
-        prominence_threshold = self.peak_prominence * noise
+        sigma = self.estimate_noise(y)
 
-        peaks, props = find_peaks(
-            data_,
-            height=height_threshold,
-            prominence=prominence_threshold,
+        prominence = self.peak_prominence_factor * sigma
+
+        peaks, properties = scipy_find_peaks(
+            y,
+            prominence=prominence,
             distance=self.peak_min_distance,
-            width=self.peak_width,
+            width=self.peak_min_width,
         )
 
         return peaks
@@ -373,6 +454,21 @@ class SignalProcessor:
         self.baseline_diff_order = config.get("baseline_diff_order", self.baseline_diff_order)
         self.baseline_iterations = config.get("baseline_iterations", self.baseline_iterations)
         self.baseline_tolerance = config.get("baseline_tolerance", self.baseline_tolerance)
+
+        self.peak_prominence_factor = config.get(
+            "peak_prominence_factor",
+            self.peak_prominence_factor,
+        )
+
+        self.peak_min_distance = config.get(
+            "peak_min_distance",
+            self.peak_min_distance,
+        )
+
+        self.peak_min_width = config.get(
+            "peak_min_width",
+            self.peak_min_width,
+        )
 
         self.enable_dark_subtraction = config.get("enable_dark_subtraction", self.enable_dark_subtraction)
         self.enable_spike_correction = config.get("enable_spike_correction", self.enable_spike_correction)

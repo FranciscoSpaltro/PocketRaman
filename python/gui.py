@@ -12,7 +12,8 @@ import numpy as np
 from signalprocessor import (DARK_N_SAMPLES_DEFAULT, SPIKE_WINDOW_DEFAULT, SPIKE_T_MULTIPLIER_DEFAULT, N_SPECTRA_DEFAULT,
                              FILTER_WINDOW_DEFAULT, FILTER_POLY_ORDER_DEFAULT, BASELINE_LAMBDA_DEFAULT, BASELINE_DIFF_ORDER_DEFAULT,
                              BASELINE_ITERATIONS_DEFAULT, BASELINE_TOLERANCE_DEFAULT, ENABLE_DARK_SUBTRACTION_DEFAULT, ENABLE_SPIKE_CORRECTION_DEFAULT,
-                             ENABLE_FILTERING_DEFAULT, ENABLE_BASELINE_CORRECTION_DEFAULT, ENABLE_NORMALIZATION_DEFAULT)
+                             ENABLE_FILTERING_DEFAULT, ENABLE_BASELINE_CORRECTION_DEFAULT, ENABLE_NORMALIZATION_DEFAULT, PEAK_PROMINENCE_FACTOR_DEFAULT,
+                             PEAK_MIN_DISTANCE_DEFAULT, PEAK_MIN_WIDTH_DEFAULT)
 
 class ProcessingConfigDialog(QDialog):
     def __init__(self, processor, parent=None):
@@ -112,6 +113,30 @@ class ProcessingConfigDialog(QDialog):
         row_baseline_tol.addWidget(self.line_baseline_tolerance)
         layout.addLayout(row_baseline_tol)
 
+        # Peak prominence factor
+        self.line_peak_prominence = QLineEdit()
+        self.line_peak_prominence.setText(str(getattr(self.processor, "peak_prominence", 3.0)))
+        row_peak_prominence = QHBoxLayout()
+        row_peak_prominence.addWidget(QLabel("Peak prominence factor:"))
+        row_peak_prominence.addWidget(self.line_peak_prominence)
+        layout.addLayout(row_peak_prominence)
+
+        # Minimum peak distance
+        self.line_peak_min_distance = QLineEdit()
+        self.line_peak_min_distance.setText(str(getattr(self.processor, "peak_min_distance", 1)))
+        row_peak_min_distance = QHBoxLayout()
+        row_peak_min_distance.addWidget(QLabel("Minimum peak distance:"))
+        row_peak_min_distance.addWidget(self.line_peak_min_distance)
+        layout.addLayout(row_peak_min_distance)
+
+        # Peak width
+        self.line_peak_width = QLineEdit()
+        self.line_peak_width.setText(str(getattr(self.processor, "peak_width", 1)))
+        row_peak_width = QHBoxLayout()
+        row_peak_width.addWidget(QLabel("Peak width:"))
+        row_peak_width.addWidget(self.line_peak_width)
+        layout.addLayout(row_peak_width)
+
         # Checkboxes for enabling/disabling processing steps
         self.checkbox_dark_subtraction = QCheckBox("Enable dark subtraction")
         self.checkbox_dark_subtraction.setChecked(getattr(self.processor, "enable_dark_subtraction", ENABLE_DARK_SUBTRACTION_DEFAULT))
@@ -172,6 +197,18 @@ class ProcessingConfigDialog(QDialog):
 
         self.processor.set_baseline_tolerance(self.line_baseline_tolerance.text())
         self.line_baseline_tolerance.setText(str(self.processor.baseline_tolerance))
+
+        self.processor.set_peak_prominence_factor(
+            self.line_peak_prominence_factor.text()
+        )
+
+        self.processor.set_peak_min_distance(
+            self.line_peak_min_distance.text()
+        )
+
+        self.processor.set_peak_min_width(
+            self.line_peak_min_width.text()
+        )
 
         self.processor.set_enable_dark_subtraction(self.checkbox_dark_subtraction.isChecked())
         self.processor.set_enable_spike_correction(self.checkbox_spike_correction.isChecked())
@@ -282,13 +319,7 @@ class RamanGUI(QMainWindow):
         # Toggle LED
         self.btn_toggle_led = QPushButton("Toggle LED")
         self.btn_toggle_led.clicked.connect(lambda: self.send_cmd('toggle_led'))
-        cmds_layout.addWidget(self.btn_toggle_led)
-        
-        # Find peaks
-        self.btn_find_peaks = QPushButton("Find Peaks")
-        self.btn_find_peaks.clicked.connect(lambda: self.toggle_find_peaks())
-        cmds_layout.addWidget(self.btn_find_peaks)
-    
+        cmds_layout.addWidget(self.btn_toggle_led)   
 
         # GROUP    
         group_cmds.setLayout(cmds_layout)
@@ -362,6 +393,15 @@ class RamanGUI(QMainWindow):
         self.btn_processing_config = QPushButton("Settings")
         self.btn_processing_config.clicked.connect(self.open_processing_config)
         processing_layout.addWidget(self.btn_processing_config)
+
+        self.btn_find_peaks = QPushButton("Show peaks")
+        self.btn_find_peaks.clicked.connect(self.toggle_find_peaks)
+        processing_layout.addWidget(self.btn_find_peaks)
+
+        self.btn_peak_labels = QPushButton("Show peak labels")
+        self.btn_peak_labels.clicked.connect(self.toggle_peak_labels)
+        self.btn_peak_labels.setEnabled(False)
+        processing_layout.addWidget(self.btn_peak_labels)
 
         self.btn_delete_config = QPushButton("Delete Configuration")
         self.btn_delete_config.clicked.connect(self.delete_configuration)
@@ -564,6 +604,7 @@ class RamanGUI(QMainWindow):
         )
 
     def dark_capture_finished(self):
+        self.processor.compute_dark_average()
         self.lbl_dark_status.setText(
             f"Dark acquired: {len(self.processor.dark_buffer)} samples"
         )
@@ -675,10 +716,14 @@ class RamanGUI(QMainWindow):
 
         if self.peaks_enabled:
             self.btn_find_peaks.setText("Hide peaks")
+            self.btn_peak_labels.setEnabled(True)
             self.find_and_plot_peaks()
         else:
-            self.btn_find_peaks.setText("Find peaks")
+            self.btn_find_peaks.setText("Show peaks")
+            self.btn_peak_labels.setEnabled(False)
+
             self.peaks_curve.setData([], [])
+            self.clear_peak_labels()
 
     # TOGGLE PEAK LABELS
     def toggle_peak_labels(self):
@@ -719,7 +764,7 @@ class RamanGUI(QMainWindow):
         if self.processor.last_processed_data is None:
             return
 
-        peaks = self.processor.find_peaks(self.processor.last_processed_data)
+        peaks = self.processor.detect_peaks(self.processor.last_processed_data)
 
         self.clear_peak_labels()
 
