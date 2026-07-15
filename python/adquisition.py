@@ -5,6 +5,7 @@ from spectrometer import SpectrometerDriverMock
 from signalprocessor import FIRST_USEFUL_PIXEL, TRAILING_UNUSED_PIXELS
 
 class AcquisitionThread(QThread):
+    raw_data_ready = Signal(np.ndarray)
     data_ready = Signal(np.ndarray)
 
     dark_progress = Signal(int, int)
@@ -76,6 +77,8 @@ class AcquisitionThread(QThread):
                 # -------------------------------------------------------------
                 # NORMAL ACQUISITION
                 # -------------------------------------------------------------
+                
+                self.raw_data_ready.emit(np.asarray(pixels, dtype=np.uint16).copy())
                 processed_data, _, _, _ = self.processor.process(pixels)
 
                 if processed_data is not None:

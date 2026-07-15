@@ -1,7 +1,7 @@
 {
     "dark_n_samples": 100,
     "spike_window": 5,
-    "spike_T_multiplier": 1.0,
+    "spike_T_multiplier": 1,
     "n_spectra": 1,
     "filter_window": 3,
     "filter_poly_order": 1,
@@ -10,11 +10,11 @@
     "baseline_iterations": 50,
     "baseline_tolerance": 0.001,
     "enable_dark_subtraction": false,
-    "enable_spike_correction": true,
-    "enable_filtering": true,
+    "enable_spike_correction": false,
+    "enable_filtering": false,
     "enable_baseline_correction": false,
-    "enable_normalization": true,
+    "enable_normalization": false,
     "peak_prominence_factor": 5.0,
-    "peak_min_distance": 1,
-    "peak_min_width": 1.0
+    "peak_min_distance": 3,
+    "peak_min_width": 1
 }
