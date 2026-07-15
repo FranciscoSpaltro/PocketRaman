@@ -236,6 +236,10 @@ class RamanGUI(QMainWindow):
         self.worker = None
         self.processor = SignalProcessor()
 
+        # None significa que el eje X se muestra en píxeles.
+        # Si hay calibración, contiene [a2, a1, a0].
+        self.wavelength_coefficients = None
+
         self.setup_ui()
 
     ###########################################################################
@@ -410,11 +414,60 @@ class RamanGUI(QMainWindow):
         # Group
         group_processing.setLayout(processing_layout)
 
+        ########################################################################
+        # WAVELENGTH CALIBRATION GROUP
+        group_calibration = QGroupBox("Wavelength Calibration")
+        calibration_layout = QVBoxLayout()
+
+        calibration_layout.addWidget(
+            QLabel("λ(x) = a₂·x² + a₁·x + a₀")
+        )
+
+        self.line_calibration_a2 = QLineEdit()
+        self.line_calibration_a2.setPlaceholderText("a₂, blank = pixel scale")
+
+        self.line_calibration_a1 = QLineEdit()
+        self.line_calibration_a1.setPlaceholderText("a₁, blank = pixel scale")
+
+        self.line_calibration_a0 = QLineEdit()
+        self.line_calibration_a0.setPlaceholderText("a₀, blank = pixel scale")
+
+        row_a2 = QHBoxLayout()
+        row_a2.addWidget(QLabel("a₂:"))
+        row_a2.addWidget(self.line_calibration_a2)
+
+        row_a1 = QHBoxLayout()
+        row_a1.addWidget(QLabel("a₁:"))
+        row_a1.addWidget(self.line_calibration_a1)
+
+        row_a0 = QHBoxLayout()
+        row_a0.addWidget(QLabel("a₀:"))
+        row_a0.addWidget(self.line_calibration_a0)
+
+        calibration_layout.addLayout(row_a2)
+        calibration_layout.addLayout(row_a1)
+        calibration_layout.addLayout(row_a0)
+
+        self.btn_apply_calibration = QPushButton("Apply calibration")
+        self.btn_apply_calibration.clicked.connect(
+            self.apply_wavelength_calibration
+        )
+        calibration_layout.addWidget(self.btn_apply_calibration)
+
+        self.btn_clear_calibration = QPushButton("Use pixel scale")
+        self.btn_clear_calibration.clicked.connect(
+            self.clear_wavelength_calibration
+        )
+        calibration_layout.addWidget(self.btn_clear_calibration)
+
+        group_calibration.setLayout(calibration_layout)
+
         # Construct the left panel
         control_layout.addWidget(group_conn)
         control_layout.addWidget(group_cmds)
         control_layout.addWidget(group_acq)
         control_layout.addWidget(group_processing)
+        control_layout.addWidget(group_calibration)
         control_layout.addStretch()
 
         ##########################################################################
@@ -495,6 +548,109 @@ class RamanGUI(QMainWindow):
         self.lbl_enable_normalization.setText(
             f"Normalization: {self._enabled_text(self.processor.enable_normalization)}"
         )
+
+    def apply_wavelength_calibration(self):
+        texts = [
+            self.line_calibration_a2.text().strip(),
+            self.line_calibration_a1.text().strip(),
+            self.line_calibration_a0.text().strip(),
+        ]
+
+        # Si no se cargó ningún coeficiente, volver a píxeles.
+        if not any(texts):
+            self.clear_wavelength_calibration()
+            return
+
+        try:
+            # Los campos vacíos individuales se interpretan como cero.
+            a2 = float(texts[0]) if texts[0] else 0.0
+            a1 = float(texts[1]) if texts[1] else 0.0
+            a0 = float(texts[2]) if texts[2] else 0.0
+        except ValueError:
+            QMessageBox.warning(
+                self,
+                "Calibration error",
+                "Calibration coefficients must be valid numbers.",
+            )
+            return
+
+        if a2 == 0.0 and a1 == 0.0:
+            QMessageBox.warning(
+                self,
+                "Calibration error",
+                "At least a₁ or a₂ must be different from zero.",
+            )
+            return
+
+        self.wavelength_coefficients = np.array(
+            [a2, a1, a0],
+            dtype=float,
+        )
+
+        self.update_x_axis()
+
+        # Redibujar inmediatamente el último espectro.
+        if self.processor.last_processed_data is not None:
+            self.update_plot(
+                self.processor.last_processed_data
+            )
+
+
+    def clear_wavelength_calibration(self):
+        self.wavelength_coefficients = None
+
+        self.line_calibration_a2.clear()
+        self.line_calibration_a1.clear()
+        self.line_calibration_a0.clear()
+
+        self.update_x_axis()
+
+        if self.processor.last_processed_data is not None:
+            self.update_plot(
+                self.processor.last_processed_data
+            )
+
+
+    def get_x_axis(self, data_length):
+        pixel_axis = np.arange(data_length, dtype=float)
+
+        if self.wavelength_coefficients is None:
+            return pixel_axis
+
+        return np.polyval(
+            self.wavelength_coefficients,
+            pixel_axis,
+        )
+
+
+    def update_x_axis(self):
+        if self.wavelength_coefficients is None:
+            self.plot_widget.setLabel(
+                "bottom",
+                "Pixel",
+                units="",
+            )
+            self.plot_widget.setXRange(
+                0,
+                USEFUL_CCD_PIXELS - 1,
+            )
+            return
+
+        wavelength_axis = self.get_x_axis(
+            USEFUL_CCD_PIXELS
+        )
+
+        self.plot_widget.setLabel(
+            "bottom",
+            "Wavelength",
+            units="nm",
+        )
+
+        self.plot_widget.setXRange(
+            float(np.min(wavelength_axis)),
+            float(np.max(wavelength_axis)),
+        )
+
 
     @staticmethod
     def _enabled_text(enabled):
@@ -759,12 +915,18 @@ class RamanGUI(QMainWindow):
             return
 
         self.processor.last_processed_data = processed_data
-        self.curve.setData(processed_data)
+
+        x_axis = self.get_x_axis(len(processed_data))
+
+        self.curve.setData(
+            x_axis,
+            processed_data,
+        )
 
         if self.processor.enable_normalization:
-            self.plot_widget.setYRange(-0.5, 1.05)
+            self.plot_widget.setYRange(-0.05, 1.05)
         else:
-            self.plot_widget.setYRange(-50, 4200) # Límite del ADC
+            self.plot_widget.setYRange(-50, 4200)
 
         if self.peaks_enabled:
             self.find_and_plot_peaks()
@@ -774,29 +936,47 @@ class RamanGUI(QMainWindow):
         if self.processor.last_processed_data is None:
             return
 
-        peaks = self.processor.detect_peaks(self.processor.last_processed_data)
+        data = self.processor.last_processed_data
+        peaks = self.processor.detect_peaks(data)
 
         self.clear_peak_labels()
 
-        if len(peaks) > 0:
-            x_peaks = peaks
-            y_peaks = self.processor.last_processed_data[peaks]
-            self.peaks_curve.setData(x_peaks, y_peaks)
-
-            if self.peak_labels_enabled:
-                for x, y in zip(x_peaks, y_peaks):
-                    label = pg.TextItem(
-                        text=f"{x}, {y:.0f}",
-                        color=(30, 30, 30),
-                        fill=pg.mkBrush(255, 255, 255, 255),
-                        border=pg.mkPen((120, 120, 120)),
-                        anchor=(0.5, 1.2),
-                    )
-                    label.setPos(x, y)
-                    self.plot_widget.addItem(label)
-                    self.peak_labels.append(label)
-        else:
+        if len(peaks) == 0:
             self.peaks_curve.setData([], [])
+            return
+
+        full_x_axis = self.get_x_axis(len(data))
+
+        x_peaks = full_x_axis[peaks]
+        y_peaks = data[peaks]
+
+        self.peaks_curve.setData(
+            x_peaks,
+            y_peaks,
+        )
+
+        if self.peak_labels_enabled:
+            for peak_index, x, y in zip(
+                peaks,
+                x_peaks,
+                y_peaks,
+            ):
+                if self.wavelength_coefficients is None:
+                    label_text = f"{peak_index}, {y:.0f}"
+                else:
+                    label_text = f"{x:.3f} nm, {y:.0f}"
+
+                label = pg.TextItem(
+                    text=label_text,
+                    color=(30, 30, 30),
+                    fill=pg.mkBrush(255, 255, 255, 255),
+                    border=pg.mkPen((120, 120, 120)),
+                    anchor=(0.5, 1.2),
+                )
+
+                label.setPos(x, y)
+                self.plot_widget.addItem(label)
+                self.peak_labels.append(label)
 
     # REFRESH PORTS
     def refresh_ports(self):
