@@ -38,6 +38,7 @@ class AcquisitionThread(QThread):
         while self.running:
             try:
                 pixels = self.dev.read_frame()
+                pixels = np.asarray(pixels[33:-14])
 
                 if not self.running:
                     break

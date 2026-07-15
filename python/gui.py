@@ -283,6 +283,12 @@ class RamanGUI(QMainWindow):
         self.btn_toggle_led = QPushButton("Toggle LED")
         self.btn_toggle_led.clicked.connect(lambda: self.send_cmd('toggle_led'))
         cmds_layout.addWidget(self.btn_toggle_led)
+        
+        # Find peaks
+        self.btn_find_peaks = QPushButton("Find Peaks")
+        self.btn_find_peaks.clicked.connect(lambda: self.toggle_find_peaks())
+        cmds_layout.addWidget(self.btn_find_peaks)
+    
 
         # GROUP    
         group_cmds.setLayout(cmds_layout)
@@ -379,7 +385,7 @@ class RamanGUI(QMainWindow):
         self.plot_widget = pg.PlotWidget(title="Spectrum in Real Time")
         self.plot_widget.setLabel('left', 'Intensity (ADC)', units='')
         self.plot_widget.setLabel('bottom', 'Pixel', units='')
-        self.plot_widget.setYRange(0, 4200) # Límite del ADC
+        self.plot_widget.setYRange(-50, 4200) # Límite del ADC
         self.plot_widget.setXRange(0, 3694)
         self.plot_widget.showGrid(x=True, y=True)
         
@@ -523,6 +529,8 @@ class RamanGUI(QMainWindow):
         elif cmd_type == 'skip':
             val = self.spin_skip.value()
             self.dev.set_skip_counter(val)
+        elif cmd_type == 'toggle_led':
+            self.dev.toggle_led()
 
     def start_dark_capture(self):
         if self.worker is None:
@@ -697,6 +705,11 @@ class RamanGUI(QMainWindow):
 
         self.processor.last_processed_data = processed_data
         self.curve.setData(processed_data)
+
+        if self.processor.enable_normalization:
+            self.plot_widget.setYRange(-0.5, 1.05)
+        else:
+            self.plot_widget.setYRange(-50, 4200) # Límite del ADC
 
         if self.peaks_enabled:
             self.find_and_plot_peaks()
