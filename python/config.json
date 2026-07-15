@@ -10,13 +10,11 @@
     "baseline_iterations": 50,
     "baseline_tolerance": 0.001,
     "enable_dark_subtraction": false,
-    "enable_spike_correction": false,
-    "enable_filtering": false,
-    "enable_baseline_correction": true,
-    "enable_normalization": false,
-    "peak_height_factor": 1.0,
-    "peak_prominence": 1.0,
-    "peak_min_distance": 1.0,
-    "peak_width": 1.0,
-    "enable_peak_finding": true
+    "enable_spike_correction": true,
+    "enable_filtering": true,
+    "enable_baseline_correction": false,
+    "enable_normalization": true,
+    "peak_prominence_factor": 5.0,
+    "peak_min_distance": 1,
+    "peak_min_width": 1.0
 }

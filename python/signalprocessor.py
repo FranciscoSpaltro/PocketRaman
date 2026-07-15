@@ -64,9 +64,9 @@ PEAK_MIN_DISTANCE_MIN = 1
 PEAK_MIN_DISTANCE_MAX = USEFUL_CCD_PIXELS
 PEAK_MIN_DISTANCE_DEFAULT = 3
 
-PEAK_MIN_WIDTH_MIN = 0.0
+PEAK_MIN_WIDTH_MIN = 0
 PEAK_MIN_WIDTH_MAX = USEFUL_CCD_PIXELS
-PEAK_MIN_WIDTH_DEFAULT = 1.0
+PEAK_MIN_WIDTH_DEFAULT = 1
 
 ENABLE_DARK_SUBTRACTION_DEFAULT = False
 ENABLE_SPIKE_CORRECTION_DEFAULT = False
@@ -210,7 +210,7 @@ class SignalProcessor:
 
 
     def set_peak_min_distance(self, value):
-        val = int(value)
+        val = int(float(value))
         val = min(
             max(val, PEAK_MIN_DISTANCE_MIN),
             PEAK_MIN_DISTANCE_MAX,
