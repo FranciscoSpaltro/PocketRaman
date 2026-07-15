@@ -13,7 +13,7 @@ from signalprocessor import (DARK_N_SAMPLES_DEFAULT, SPIKE_WINDOW_DEFAULT, SPIKE
                              FILTER_WINDOW_DEFAULT, FILTER_POLY_ORDER_DEFAULT, BASELINE_LAMBDA_DEFAULT, BASELINE_DIFF_ORDER_DEFAULT,
                              BASELINE_ITERATIONS_DEFAULT, BASELINE_TOLERANCE_DEFAULT, ENABLE_DARK_SUBTRACTION_DEFAULT, ENABLE_SPIKE_CORRECTION_DEFAULT,
                              ENABLE_FILTERING_DEFAULT, ENABLE_BASELINE_CORRECTION_DEFAULT, ENABLE_NORMALIZATION_DEFAULT, PEAK_PROMINENCE_FACTOR_DEFAULT,
-                             PEAK_MIN_DISTANCE_DEFAULT, PEAK_MIN_WIDTH_DEFAULT)
+                             PEAK_MIN_DISTANCE_DEFAULT, PEAK_MIN_WIDTH_DEFAULT, USEFUL_CCD_PIXELS)
 
 class ProcessingConfigDialog(QDialog):
     def __init__(self, processor, parent=None):
@@ -114,28 +114,28 @@ class ProcessingConfigDialog(QDialog):
         layout.addLayout(row_baseline_tol)
 
         # Peak prominence factor
-        self.line_peak_prominence = QLineEdit()
-        self.line_peak_prominence.setText(str(getattr(self.processor, "peak_prominence", 3.0)))
-        row_peak_prominence = QHBoxLayout()
-        row_peak_prominence.addWidget(QLabel("Peak prominence factor:"))
-        row_peak_prominence.addWidget(self.line_peak_prominence)
-        layout.addLayout(row_peak_prominence)
+        self.line_peak_prominence_factor = QLineEdit()
+        self.line_peak_prominence_factor.setText(str(getattr(self.processor, "peak_prominence_factor", PEAK_PROMINENCE_FACTOR_DEFAULT)))
+        row_peak_prominence_factor = QHBoxLayout()
+        row_peak_prominence_factor.addWidget(QLabel("Peak prominence factor:"))
+        row_peak_prominence_factor.addWidget(self.line_peak_prominence_factor)
+        layout.addLayout(row_peak_prominence_factor)
 
         # Minimum peak distance
         self.line_peak_min_distance = QLineEdit()
-        self.line_peak_min_distance.setText(str(getattr(self.processor, "peak_min_distance", 1)))
+        self.line_peak_min_distance.setText(str(getattr(self.processor, "peak_min_distance", PEAK_MIN_DISTANCE_DEFAULT)))
         row_peak_min_distance = QHBoxLayout()
         row_peak_min_distance.addWidget(QLabel("Minimum peak distance:"))
         row_peak_min_distance.addWidget(self.line_peak_min_distance)
         layout.addLayout(row_peak_min_distance)
 
         # Peak width
-        self.line_peak_width = QLineEdit()
-        self.line_peak_width.setText(str(getattr(self.processor, "peak_width", 1)))
-        row_peak_width = QHBoxLayout()
-        row_peak_width.addWidget(QLabel("Peak width:"))
-        row_peak_width.addWidget(self.line_peak_width)
-        layout.addLayout(row_peak_width)
+        self.line_peak_min_width = QLineEdit()
+        self.line_peak_min_width.setText(str(getattr(self.processor, "peak_min_width", PEAK_MIN_WIDTH_DEFAULT)))
+        row_peak_min_width = QHBoxLayout()
+        row_peak_min_width.addWidget(QLabel("Minimum peak width:"))
+        row_peak_min_width.addWidget(self.line_peak_min_width)
+        layout.addLayout(row_peak_min_width)
 
         # Checkboxes for enabling/disabling processing steps
         self.checkbox_dark_subtraction = QCheckBox("Enable dark subtraction")
@@ -426,7 +426,7 @@ class RamanGUI(QMainWindow):
         self.plot_widget.setLabel('left', 'Intensity (ADC)', units='')
         self.plot_widget.setLabel('bottom', 'Pixel', units='')
         self.plot_widget.setYRange(-50, 4200) # Límite del ADC
-        self.plot_widget.setXRange(0, 3694)
+        self.plot_widget.setXRange(0, USEFUL_CCD_PIXELS)
         self.plot_widget.showGrid(x=True, y=True)
         
         self.curve = self.plot_widget.plot(pen=pg.mkPen('b', width=2)) # Curva azul
@@ -604,23 +604,33 @@ class RamanGUI(QMainWindow):
         )
 
     def dark_capture_finished(self):
-        self.processor.compute_dark_average()
-        self.lbl_dark_status.setText(
-            f"Dark acquired: {len(self.processor.dark_buffer)} samples"
-        )
-
         self.btn_dark.setEnabled(True)
         self.btn_start.setEnabled(True)
+
+        if self.processor.dark_average is None:
+            self.lbl_dark_status.setText("Dark acquisition failed")
+
+            QMessageBox.warning(
+                self,
+                "Dark acquisition",
+                "The dark spectrum could not be calculated.",
+            )
+            return
+
+        self.lbl_dark_status.setText(
+            f"Dark acquired: {self.processor.dark_n_samples} samples averaged"
+        )
 
         QMessageBox.information(
             self,
             "Dark acquisition",
             (
-                f"Dark spectrum acquired successfully.\n\n"
-                f"Samples: {len(self.processor.dark_buffer)}"
+                "Dark spectrum acquired successfully.\n\n"
+                f"Samples averaged: {self.processor.dark_n_samples}"
             ),
         )
-        ############################################################################
+    
+    ############################################################################
     # UPDATERS
     ############################################################################
     # ADQUISITION BUTTON

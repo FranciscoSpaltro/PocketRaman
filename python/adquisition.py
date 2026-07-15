@@ -2,7 +2,7 @@ from PySide6.QtCore import QThread, Signal
 import numpy as np
 
 from spectrometer import SpectrometerDriverMock
-
+from signalprocessor import FIRST_USEFUL_PIXEL, TRAILING_UNUSED_PIXELS
 
 class AcquisitionThread(QThread):
     data_ready = Signal(np.ndarray)
@@ -23,6 +23,7 @@ class AcquisitionThread(QThread):
 
     def start_dark_capture(self):
         self.processor.dark_buffer.clear()
+        self.processor.dark_average = None
         self.dark_samples_acquired = 0
         self.capturing_dark = True
 
@@ -30,6 +31,7 @@ class AcquisitionThread(QThread):
         self.capturing_dark = False
         self.dark_samples_acquired = 0
         self.processor.dark_buffer.clear()
+        self.processor.dark_average = None
 
     def run(self):
         self.running = True
@@ -38,7 +40,6 @@ class AcquisitionThread(QThread):
         while self.running:
             try:
                 pixels = self.dev.read_frame()
-                pixels = np.asarray(pixels[33:-14])
 
                 if not self.running:
                     break
@@ -46,7 +47,9 @@ class AcquisitionThread(QThread):
                 if pixels is None:
                     self.msleep(10)
                     continue
-
+                    
+                pixels = np.asarray(pixels[FIRST_USEFUL_PIXEL:-TRAILING_UNUSED_PIXELS])
+                
                 # -------------------------------------------------------------
                 # DARK CAPTURE
                 # -------------------------------------------------------------
@@ -62,11 +65,9 @@ class AcquisitionThread(QThread):
                         self.processor.dark_n_samples,
                     )
 
-                    if (
-                        self.dark_samples_acquired
-                        >= self.processor.dark_n_samples
-                    ):
+                    if self.dark_samples_acquired >= self.processor.dark_n_samples:
                         self.capturing_dark = False
+                        self.processor.compute_dark_average()
                         self.dark_finished.emit()
 
                     # Este frame no entra al procesamiento normal
