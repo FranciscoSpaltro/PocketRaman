@@ -1,7 +1,7 @@
 {
-    "dark_n_samples": 1000,
+    "dark_n_samples": 100,
     "spike_window": 5,
-    "spike_T_multiplier": 1,
+    "spike_T_multiplier": 10.0,
     "n_spectra": 1,
     "filter_window": 3,
     "filter_poly_order": 1,

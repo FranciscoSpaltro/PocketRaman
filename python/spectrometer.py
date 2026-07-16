@@ -146,7 +146,7 @@ class SpectrometerDriver:
             pixels_clean = full_arr[:self.CCD_PIXELS]
             
             # Log para verificar el nivel de señal
-            print(f"Espectro capturado OK. Máximo valor del ADC: {np.max(pixels_clean)} cuentas.")
+            #print(f"Espectro capturado OK. Máximo valor del ADC: {np.max(pixels_clean)} cuentas.")
             return pixels_clean
         
         # --- CASO C: COMANDO EXTRAÑO / RUIDO ---
