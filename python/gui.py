@@ -535,6 +535,55 @@ class RamanGUI(QMainWindow):
         )
         processing_layout.addWidget(self.btn_restore_processing)
 
+        # ---------------------------------------------------------------------
+        # Peak detection
+        # ---------------------------------------------------------------------
+        self.edit_peak_prominence = QLineEdit(
+            str(self.processor.peak_prominence_factor)
+        )
+        self.edit_peak_prominence.editingFinished.connect(
+            lambda: self.update_processing_value(
+                self.edit_peak_prominence,
+                self.processor.set_peak_prominence_factor,
+                "peak_prominence_factor",
+            )
+        )
+        processing_form.addRow(
+            "Peak prominence (σ):",
+            self.edit_peak_prominence,
+        )
+
+        self.edit_peak_min_distance = QLineEdit(
+            str(self.processor.peak_min_distance)
+        )
+        self.edit_peak_min_distance.editingFinished.connect(
+            lambda: self.update_processing_value(
+                self.edit_peak_min_distance,
+                self.processor.set_peak_min_distance,
+                "peak_min_distance",
+            )
+        )
+        processing_form.addRow(
+            "Peak distance:",
+            self.edit_peak_min_distance,
+        )
+
+        self.edit_peak_min_width = QLineEdit(
+            str(self.processor.peak_min_width)
+        )
+        self.edit_peak_min_width.editingFinished.connect(
+            lambda: self.update_processing_value(
+                self.edit_peak_min_width,
+                self.processor.set_peak_min_width,
+                "peak_min_width",
+            )
+        )
+        processing_form.addRow(
+            "Peak width:",
+            self.edit_peak_min_width,
+        )
+
+
         group_processing.setLayout(processing_layout)
 
         ########################################################################
@@ -901,6 +950,18 @@ class RamanGUI(QMainWindow):
 
         self.checkbox_normalization.setChecked(
             self.processor.enable_normalization
+        )
+
+        self.edit_peak_prominence.setText(
+            str(self.processor.peak_prominence_factor)
+        )
+
+        self.edit_peak_min_distance.setText(
+            str(self.processor.peak_min_distance)
+        )
+
+        self.edit_peak_min_width.setText(
+            str(self.processor.peak_min_width)
         )
 
     def delete_configuration(self):
