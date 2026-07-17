@@ -13,6 +13,7 @@ import numpy as np
 from pathlib import Path
 import json
 from signalprocessor import (USEFUL_CCD_PIXELS)
+from gpiozero import OutputDevice
       
 class CalibrationDialog(QDialog):
     def __init__(self, coefficients=None, parent=None):
@@ -123,6 +124,7 @@ class RamanGUI(QMainWindow):
     ###########################################################################
     def __init__(self):
         super().__init__()
+        self.laser = OutputDevice(17, active_high=False, initial_value=False) # GPIO17, LOW = encendido, empieza apagado
         self.setWindowTitle("Spectrometer Raman - Control Panel")
         self.resize(1000, 600)
 
@@ -198,7 +200,7 @@ class RamanGUI(QMainWindow):
         
         # Tiempo de integración
         self.spin_time = QSpinBox()
-        self.spin_time.setRange(1, 1000000)
+        self.spin_time.setRange(1, 4000000)
         self.spin_time.setValue(100)
         self.btn_time = QPushButton("Set Integration Time (us)")
         self.btn_time.clicked.connect(lambda: self.send_cmd('time'))
@@ -233,6 +235,13 @@ class RamanGUI(QMainWindow):
         self.btn_toggle_led = QPushButton("Toggle LED")
         self.btn_toggle_led.clicked.connect(lambda: self.send_cmd('toggle_led'))
         cmds_layout.addWidget(self.btn_toggle_led)   
+
+        # Laser
+        self.btn_laser = QPushButton("Laser OFF")
+        self.btn_laser.setCheckable(True)
+        self.btn_laser.setChecked(False)
+        self.btn_laser.clicked.connect(self.set_laser_state)
+        cmds_layout.addWidget(self.btn_laser)
 
         # GROUP    
         group_cmds.setLayout(cmds_layout)
@@ -771,6 +780,14 @@ class RamanGUI(QMainWindow):
 
         self.processor.spectra_buffer.clear()
 
+    def set_laser_state(self, enabled: bool) -> None:
+        if enabled:
+            self.laser.on()
+            self.btn_laser.setText("Laser ON")
+        else:
+            self.laser.off()
+            self.btn_laser.setText("Laser OFF")
+
     def update_processing_value(
         self,
         widget,
@@ -1220,7 +1237,7 @@ class RamanGUI(QMainWindow):
             if port == "__MOCK__":
                 self.dev = SpectrometerDriverMock()
             else:
-                self.dev = SpectrometerDriver(port=port, timeout=0.25)
+                self.dev = SpectrometerDriver(port=port, timeout=5.0)
             self.btn_connect.setText("Connected")
             self.btn_connect.setStyleSheet("background-color: #ccffcc;")
             self.btn_connect.setEnabled(False)
@@ -1936,4 +1953,8 @@ class RamanGUI(QMainWindow):
             self.worker.stop()
         if self.dev:
             self.dev.close()
-        event.accept()
+        try:
+            self.laser.off()
+            self.laser.close()
+        finally:
+            event.accept()
