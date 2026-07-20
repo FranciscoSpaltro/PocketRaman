@@ -15,7 +15,7 @@ class SpectrometerDriver:
     CMD_ACK                 = 0xFF46
     CCD_PIXELS = 3694
 
-    def __init__(self, port="COM7", baud=921600, timeout=2):
+    def __init__(self, port="COM7", baud=921600, timeout=10):
         self.int_time_us = 100
         self.n_accum = 50
         self.skip_count = 0

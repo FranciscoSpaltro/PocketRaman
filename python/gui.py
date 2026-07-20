@@ -117,6 +117,7 @@ class CalibrationDialog(QDialog):
 
 ###############################################################################
 ###############################################################################
+from PySide6.QtCore import QElapsedTimer, QTimer
         
 class RamanGUI(QMainWindow):
     ###########################################################################
@@ -200,9 +201,9 @@ class RamanGUI(QMainWindow):
         
         # Tiempo de integración
         self.spin_time = QSpinBox()
-        self.spin_time.setRange(1, 4000000)
+        self.spin_time.setRange(0.001, 100000)
         self.spin_time.setValue(100)
-        self.btn_time = QPushButton("Set Integration Time (us)")
+        self.btn_time = QPushButton("Set Integration Time (ms)")
         self.btn_time.clicked.connect(lambda: self.send_cmd('time'))
         cmds_layout.addWidget(self.spin_time)
         cmds_layout.addWidget(self.btn_time)
@@ -260,9 +261,14 @@ class RamanGUI(QMainWindow):
         self.btn_dark.setEnabled(False)
         self.btn_dark.clicked.connect(self.start_dark_capture)
 
+        self.frame_label = QLabel("Frame: 0")
+        self.frame_time_label = QLabel("Next frame: 0.00 s")
+
         acq_layout.addWidget(self.btn_dark)
         self.lbl_dark_status = QLabel("Dark: not acquired")
         acq_layout.addWidget(self.lbl_dark_status)
+        acq_layout.addWidget(self.frame_label)
+        acq_layout.addWidget(self.frame_time_label)
 
         group_acq.setLayout(acq_layout)
 
@@ -685,6 +691,16 @@ class RamanGUI(QMainWindow):
 
         main_layout.addWidget(control_scroll)
         main_layout.addWidget(self.plot_widget)
+
+    def update_acquisition_status(self) -> None:
+        elapsed_s = self.packet_timer.elapsed() / 1000.0
+        integration_s = self.dev.int_time_us / 1000000.0
+
+        if integration_s > 0:
+            remaining_s = max(0.0, integration_s - elapsed_s)
+            self.frame_time_label.setText(f"Next frame: {elapsed_s:.2f} / {integration_s:.2f} s " f"({remaining_s:.2f} s remaining)")
+        else:
+            self.frame_time_label.setText(f"Since last frame: {elapsed_s:.2f} s")
 
     def show_imported_spectrum(self, index):
         if self.imported_raw_spectra is None:
@@ -1237,7 +1253,7 @@ class RamanGUI(QMainWindow):
             if port == "__MOCK__":
                 self.dev = SpectrometerDriverMock()
             else:
-                self.dev = SpectrometerDriver(port=port, timeout=5.0)
+                self.dev = SpectrometerDriver(port=port, timeout=10.0)
             self.btn_connect.setText("Connected")
             self.btn_connect.setStyleSheet("background-color: #ccffcc;")
             self.btn_connect.setEnabled(False)
@@ -1258,7 +1274,17 @@ class RamanGUI(QMainWindow):
             self.worker.dark_progress.connect(self.update_dark_progress)
             self.worker.dark_finished.connect(self.dark_capture_finished)
             self.worker.acquisition_error.connect(self.show_acquisition_error)
-            
+                
+            self.frame_counter = 0
+
+            self.packet_timer = QElapsedTimer()
+            self.packet_timer.start()
+
+            self.acquisition_ui_timer = QTimer(self)
+            self.acquisition_ui_timer.setInterval(100)
+            self.acquisition_ui_timer.timeout.connect(self.update_acquisition_status)
+            self.acquisition_ui_timer.start()
+
         except Exception as e:
             QMessageBox.critical(self, "Connection Error", f"Could not connect to {port}.\n\n{str(e)}")
 
@@ -1514,7 +1540,7 @@ class RamanGUI(QMainWindow):
         if cmd_type == 'reset':
             self.dev.reset_device()
         elif cmd_type == 'time':
-            val = self.spin_time.value()
+            val = self.spin_time.value()*1000
             self.dev.set_integration_time(val)
         elif cmd_type == 'accum':
             val = self.spin_accum.value()
@@ -1855,6 +1881,10 @@ class RamanGUI(QMainWindow):
             and self.data_source == "imported"
         ):
             return
+
+        self.frame_counter += 1
+        self.frame_label.setText(f"Frame: {self.frame_counter}")
+        self.packet_timer.restart()
 
         self.processor.last_processed_data = processed_data
 
