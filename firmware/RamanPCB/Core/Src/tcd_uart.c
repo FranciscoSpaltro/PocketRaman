@@ -19,7 +19,7 @@ volatile uint16_t cmd_rx;
 volatile uint16_t payload_rx[2] = {0};
 volatile uint16_t rx_cmd_buffer[SIZE_RX_BUFFER_CMD_BYTES/2] = {0};
 volatile uint8_t uart_busy = 0;
-volatile uint32_t n_skip_counter = 1;
+volatile uint32_t n_skip_counter = 0;
 
 uint16_t ack_buffer[6] = {HEADER, ACK_COMMAND, 0xFFFF, 0xFFFF, HEADER^ACK_COMMAND^0xFFFF^0xFFFF^END_BUFFER, END_BUFFER};
 
