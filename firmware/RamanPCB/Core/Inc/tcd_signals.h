@@ -4,8 +4,11 @@
 #include <stdint.h>
 #include "main.h"
 
-#define SH_EDGES_MAX 1500
-#define T_INT_MIN_US 10
+#define SH_EDGES_MAX 		1500	/* MIN: 150 PARA EL READOUT */
+#define T_INT_MIN_US 		10		/* GARANTIZA QUE T_INT_TICS > TS0_TICS + TS1_TICS */
+#define TICKS_PER_US 		2U
+#define T_READOUT_US		7400U
+#define T_FLUSH_PERIOD_US	100U	/* DEBE SER MAYOR QUE TS1_TICS + TS2_TICS */
 
 void calculate_times(uint32_t t_int_us);
 void build_SH_table(void);

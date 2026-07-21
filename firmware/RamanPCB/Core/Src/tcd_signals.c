@@ -6,7 +6,7 @@ extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim5;
 extern ADC_HandleTypeDef hadc1;
 extern volatile uint8_t send_now;
-//extern volatile uint8_t is_flushing;
+
 extern volatile uint32_t n_accum;
 extern volatile uint32_t n_skip_counter;
 
@@ -18,10 +18,11 @@ volatile uint16_t adc_buffer[CCD_PIXELS];
 volatile uint32_t accum_buffer[CCD_PIXELS] = {0};
 volatile uint16_t frame[CCD_PIXELS];
 
-volatile int n = 0;
-volatile int real_SH_EDGES = 0;
+uint32_t n = 0;
+uint32_t real_SH_EDGES = 0;
 uint32_t sh_ccr[SH_EDGES_MAX];
-volatile int acumulaciones = 0;
+
+volatile uint32_t acumulaciones = 0;
 
 const uint32_t TS0_tics = 1;
 const uint32_t TS1_tics = 2;
@@ -43,16 +44,21 @@ uint32_t TS6_tics = 0;
  * Deben recalcularse las tablas CCR de SH e ICG
  */
 void calculate_times(uint32_t t_int_us){
-    // fM = 2 MHz -> 1 us = 2 tics
-	const uint16_t tics_por_microsegundo = 2;			// [REVISAR] -> hacerlo portable
-    uint32_t t_int_tics = 0;
+    uint32_t t_int_us_final = t_int_us;
 
-    if(t_int_us < T_INT_MIN_US)
-        t_int_tics = T_INT_MIN_US * tics_por_microsegundo;
-    /*else if(t_int_us > T_INT_MAX_US)
-    	t_int_tics = T_INT_MAX_US * tics_por_microsegundo;*/
-    else
-        t_int_tics = t_int_us * tics_por_microsegundo;
+    if(t_int_us < T_INT_MIN_US){
+    	t_int_us_final = T_INT_MIN_US;	/* GARANTIZA QUE T_INT_TICS > TS0_TICS + TS1_TICS */
+    }
+
+    /*
+     * 	if(t_int_us > T_INT_MAX_US) {
+     * 		t_int_us_final = T_INT_MAX_US;
+     * 	}
+     */
+
+    const uint32_t t_int_tics = t_int_us_final * TICKS_PER_US;
+    const uint32_t t_readout_tics = T_READOUT_US * TICKS_PER_US;
+    const uint32_t t_flush_tics = T_FLUSH_PERIOD_US * TICKS_PER_US;	/* SE DEFINIO DE FORMA TAL QUE SEA MAYOR QUE TS1_TICS + TS2_TICS */
 
     /*
      * MODELO: desde el momento que baja ICG:
@@ -64,27 +70,24 @@ void calculate_times(uint32_t t_int_us){
      * S5: tiempo en OFF de SH -> t_int - S4
      * S6: desde la bajada de SH hasta la bajada de ICG -> TS5 - TS0
      */
-    TS3_tics = t_int_tics - TS1_tics - TS2_tics;
+    TS3_tics = t_flush_tics - TS1_tics - TS2_tics;
     TS4_tics = TS1_tics;
-    TS5_tics = t_int_tics - TS4_tics;
-    TS6_tics = TS5_tics - TS0_tics;
+    TS5_tics = t_flush_tics - TS4_tics;
+    TS6_tics = t_int_tics - TS0_tics - TS1_tics;
 
-    const uint32_t t_readout_tics = 7400 * tics_por_microsegundo;
+    const uint32_t first_fall_tics = TS0_tics + TS1_tics;
+    uint32_t flush_intervals = 1U;
 
-    // Cálculo de 'n' (Número de pulsos de limpieza durante el readout)
-    /*
-     * TS3 + n * (TS4 + TS5) + TS4 + TS6 >= t_readout
-     * n >= (t_readout - TS3 - TS4 - TS6) / (TS4 + TS5) = (t_readout - TS3 - TS4 - TS6) / t_int
-     */
-
-    uint32_t overhead = TS0_tics + TS1_tics + TS2_tics + TS3_tics + TS4_tics + TS6_tics;	// Tiempo sin contar los ciclos TS4-TS5
-
-    if (t_readout_tics + t_int_tics > overhead) {
-         n = (t_readout_tics - TS3_tics - TS4_tics - TS6_tics + t_int_tics - 1) / t_int_tics;
-    } else {
-         n = 0;
+    if(t_readout_tics > first_fall_tics){
+    	const uint32_t remaining_tics = t_readout_tics - first_fall_tics;
+    	flush_intervals = (remaining_tics + t_flush_tics - 1U) / t_flush_tics;
     }
 
+    n = flush_intervals - 1U;
+    const uint32_t required_edges = 4U + 2U * n;
+    if(required_edges > SH_EDGES_MAX) {
+    	n = (SH_EDGES_MAX - 4U) / 2U;
+    }
 }
 
 /**
@@ -96,27 +99,28 @@ void build_SH_table(void)
 {
 	// Se arma un vector local con todos los tiempos en base al 'n' actualizado
 	static uint32_t sh_dt[SH_EDGES_MAX];
+	uint32_t index = 0U;
 
-	sh_dt[0] = TS0_tics;
-	sh_dt[1] = TS1_tics;
-	sh_dt[2] = TS2_tics + TS3_tics;
+	sh_dt[index++] = TS0_tics;
+	sh_dt[index ++] = TS1_tics;
+	sh_dt[index++] = TS2_tics + TS3_tics;
 
-	for(int i = 0; i < n; i++){
-		sh_dt[3 + 2 * i] = TS4_tics;
-		sh_dt[3 + 2 * i + 1] = TS5_tics;
+	for(uint32_t i = 0U; i < n; i++){
+		sh_dt[index++] = TS4_tics;
+		sh_dt[index++] = TS5_tics;
 	}
 
-	sh_dt[2 + 2 * n + 1] = TS4_tics;
+	sh_dt[index++] = TS4_tics;
 
 	// De S0 a S0 hay 4 flancos (extremos de S1 y del último S4) más 2*n de cada S4 que se repite
-	real_SH_EDGES = 4 + 2 * n;
+	real_SH_EDGES = index;
 
-    uint32_t t = 0;
+    uint32_t accumulated_tics = 0U;
 
     // Se arma el CCR (acumulativo)
-    for (uint32_t i = 0; i < real_SH_EDGES; i++) {
-        t += sh_dt[i];
-        sh_ccr[i] = t;
+    for (uint32_t i = 0U; i < real_SH_EDGES; i++) {
+        accumulated_tics += sh_dt[i];
+        sh_ccr[i] = accumulated_tics;
     }
 
 }

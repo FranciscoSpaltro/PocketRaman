@@ -157,6 +157,9 @@ class RamanGUI(QMainWindow):
     ###########################################################################
     # GUI SETUP
     ###########################################################################
+    def reset_frame_counter(self):
+        self.frame_counter = 0
+        
     def setup_ui(self):
         # Central widget and main layout
         central_widget = QWidget()
@@ -264,7 +267,11 @@ class RamanGUI(QMainWindow):
         self.frame_label = QLabel("Frame: 0")
         self.frame_time_label = QLabel("Next frame: 0.00 s")
 
+        self.btn_reset_frame_counter = QPushButton("Reset Frame Counter")
+        self.btn_reset_frame_counter.clicked.connect(self.reset_frame_counter)
+
         acq_layout.addWidget(self.btn_dark)
+        acq_layout.addWidget(self.btn_reset_frame_counter)
         self.lbl_dark_status = QLabel("Dark: not acquired")
         acq_layout.addWidget(self.lbl_dark_status)
         acq_layout.addWidget(self.frame_label)
@@ -747,8 +754,6 @@ class RamanGUI(QMainWindow):
 
         if integration_s > 0:
             remaining_s = max(0.0, integration_s - elapsed_s)
-            self.frame_time_label.setText(f"Next frame: {elapsed_s:.2f} / {integration_s:.2f} s " f"({remaining_s:.2f} s remaining)")
-        else:
             self.frame_time_label.setText(f"Since last frame: {elapsed_s:.2f} s")
 
     def show_imported_spectrum(self, index):
