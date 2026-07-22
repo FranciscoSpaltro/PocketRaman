@@ -10,7 +10,6 @@ extern volatile uint8_t adc_busy;
 extern volatile uint32_t skip_counter;
 
 extern volatile uint32_t accum_buffer[CCD_PIXELS];
-extern volatile int acumulaciones;
 
 volatile uint8_t process_instruction_flag = 0;
 volatile uint8_t send_now = 0;
@@ -165,7 +164,6 @@ void reset_parameters(void){
 	uart_busy = 0;
 	send_now = 0;
 	can_save = 1;
-	acumulaciones = 0;
 	skip_counter = 0;
 	for(int i = 0; i < CCD_PIXELS; i++){
 		accum_buffer[i] = 0;
@@ -192,13 +190,6 @@ void process_instruction(){
 			break;
 		}
 
-		case SET_NUMBER_OF_ACCUMULATIONS:{
-			n_accum = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
-			// Chequear valor
-			processed = 1;
-			break;
-		}
-
 		case SET_SKIP_COUNTER:{
 			n_skip_counter = ((uint32_t)payload_rx[1] << 16) | payload_rx[0];
 			processed = 1;
@@ -218,10 +209,10 @@ void process_instruction(){
 	if(processed ==1){
 		HAL_UART_Transmit(&huart6, (uint8_t*)ack_buffer, 12, HAL_MAX_DELAY);
 		HAL_Delay(5);
-		start_timers(1);
 	}
 
 	reset_parameters();
+	start_timers(1);
 
 }
 

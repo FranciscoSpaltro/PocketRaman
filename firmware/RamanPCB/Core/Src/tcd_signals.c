@@ -22,8 +22,6 @@ uint32_t n = 0;
 uint32_t real_SH_EDGES = 0;
 uint32_t sh_ccr[SH_EDGES_MAX];
 
-volatile uint32_t acumulaciones = 0;
-
 const uint32_t TS0_tics = 1;
 const uint32_t TS1_tics = 2;
 const uint32_t TS2_tics = 10;
@@ -144,7 +142,7 @@ void start_timers(uint8_t start){
 		__HAL_TIM_SET_AUTORELOAD(&htim5, sh_ccr[real_SH_EDGES-1] + TS6_tics);
 		__HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, sh_ccr[0]);
 
-		HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1);
+		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 		HAL_TIM_OC_Start_DMA(&htim5, TIM_CHANNEL_2, (uint32_t*)sh_ccr, real_SH_EDGES);
 		HAL_TIM_PWM_Start_IT(&htim5, TIM_CHANNEL_4);
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
@@ -157,7 +155,6 @@ void start_timers(uint8_t start){
 		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
 		HAL_TIM_OC_Stop_DMA(&htim5, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Stop_IT(&htim5, TIM_CHANNEL_4);
-		HAL_TIM_PWM_Stop_IT(&htim1, TIM_CHANNEL_1);
 
 		HAL_TIM_Base_Stop(&htim3);
 		HAL_TIM_Base_Stop(&htim1);
@@ -213,29 +210,5 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 			return;
     	}
 
-    	for(int i = 0; i < CCD_PIXELS; i++){
-    		accum_buffer[i] += adc_buffer[i];
-    	}
-
-    	acumulaciones++;
-
-    	if(acumulaciones >= n_accum){
-			for (int i = 0; i < CCD_PIXELS; i++) {
-				frame[i] = (uint16_t)(accum_buffer[i] / n_accum);
-				accum_buffer[i] = 0;
-			}
-
-			acumulaciones = 0;
-    		adc_busy = 0;
-    		can_save = 0;
-    		send_now = 1;
-
-    	}
-
-    	else{
-    		adc_busy = 0;
-    		can_save = 1;
-    		send_now = 0;
-    	}
     }
 }
