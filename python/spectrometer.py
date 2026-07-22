@@ -2,6 +2,8 @@ import serial
 import struct
 import numpy as np
 
+TIMEOUT_S = 100
+
 class SpectrometerDriver:
     HEADER_VAL = 0x7346
     END_BUFFER_VAL = 0x7347
@@ -15,7 +17,7 @@ class SpectrometerDriver:
     CMD_ACK                 = 0xFF46
     CCD_PIXELS = 3694
 
-    def __init__(self, port="COM7", baud=921600, timeout=10):
+    def __init__(self, port="COM7", baud=921600, timeout=TIMEOUT_S):
         self.int_time_us = 100
         self.n_accum = 50
         self.skip_count = 0
