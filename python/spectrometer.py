@@ -11,7 +11,6 @@ class SpectrometerDriver:
     CMD_SET_INT_TIME        = 0xF001
     CMD_RESET               = 0xF002
     CMD_DATA_SENDING        = 0xF003
-    CMD_SET_ACCUM           = 0xF004
     CMD_SET_SKIP_COUNTER    = 0xF005
     CMD_TOGGLE_LED          = 0xF006
     CMD_ACK                 = 0xFF46
@@ -71,11 +70,6 @@ class SpectrometerDriver:
         print(f"Set Integration Time: {time_us} us")
         self._send_command(self.CMD_SET_INT_TIME, time_us)
         self.int_time_us = time_us
-
-    def set_accumulations(self, n_accum):
-        print(f"Set Accumulations: {n_accum}")
-        self._send_command(self.CMD_SET_ACCUM, n_accum)
-        self.n_accum = n_accum
 
     def set_skip_counter(self, skip_count):
         print(f"Set skip counter: {skip_count}")

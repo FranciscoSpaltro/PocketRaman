@@ -46,28 +46,21 @@ except ImportError:
 # Reference wavelengths can be edited or moved to a JSON/CSV file later.
 # The intensity value is only used to choose which lines are shown first.
 NEON_REFERENCE_LINES = [
-    (540.056, 0.30),
-    (556.277, 0.20),
-    (565.666, 0.35),
-    (571.922, 0.45),
-    (574.830, 0.30),
-    (576.442, 0.35),
-    (580.445, 0.45),
-    (585.249, 1.00),
-    (588.190, 0.55),
-    (594.483, 0.75),
-    (597.553, 0.40),
-    (602.999, 0.65),
-    (607.434, 0.50),
-    (609.616, 0.45),
-    (614.306, 0.80),
-    (616.359, 0.55),
-    (621.728, 0.70),
-    (626.650, 0.65),
-    (630.479, 0.35),
-    (633.443, 0.60),
-    (638.299, 0.65),
-    (640.225, 0.45),
+	(585.24879, 0.2),
+	(588.18952, 0.1),
+	(602.99969, 0.1),
+	(607.43377, 0.1),
+	(614.30626, 0.1),
+	(621.72812, 0.1),
+	(626.6495, 0.1),
+	(633.44278, 0.1),
+	(638.29917, 0.1),
+	(640.2248, 0.2),
+	(650.65281, 0.15),
+	(659.89529, 0.1),
+	(692.94673, 1),
+	(703.24131, 0.8),
+	(748.88712, 0.3),
 ]
 
 
@@ -1063,7 +1056,7 @@ class RamanGUI(QMainWindow):
 
         commands = {
             "reset": self.dev.reset_device,
-            "time": lambda: self.dev.set_integration_time(self.spin_time.value() * 1000.0),
+            "time": lambda: self.dev.set_integration_time(int(self.spin_time.value() * 1000.0)),
             "skip": lambda: self.dev.set_skip_counter(self.spin_skip.value()),
             "toggle_led": self.dev.toggle_led,
         }
@@ -1150,20 +1143,46 @@ class RamanGUI(QMainWindow):
         self.btn_record.setStyleSheet("")
 
         count = len(self.recorded_raw_spectra)
+
         if count == 0:
-            self.lbl_recording_status.setText("No spectra recorded")
+            self.lbl_recording_status.setText(
+                "No spectra recorded"
+            )
             return
 
-        default_name = "raman_raw_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".npz"
+        default_name = (
+            "raman_raw_"
+            + datetime.now().strftime("%Y%m%d_%H%M%S")
+            + ".npz"
+        )
+
+        data_directory = (
+            Path(__file__).resolve().parent
+            / "data"
+        )
+
+        data_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        default_path = (
+            data_directory
+            / default_name
+        )
+
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Save raw Raman data",
-            str(Path.home() / default_name),
+            str(default_path),
             "NumPy compressed file (*.npz)",
         )
+
         if not filename:
             self.recorded_raw_spectra.clear()
-            self.lbl_recording_status.setText("Recording discarded")
+            self.lbl_recording_status.setText(
+                "Recording discarded"
+            )
             return
 
         if not filename.lower().endswith(".npz"):
@@ -1171,10 +1190,19 @@ class RamanGUI(QMainWindow):
 
         try:
             self.save_raw_recording(filename)
-            self.lbl_recording_status.setText(f"Saved: {count} spectra")
+
+            self.lbl_recording_status.setText(
+                f"Saved: {count} spectra"
+            )
+
             self.recorded_raw_spectra.clear()
+
         except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Recording error", str(exc))
+            QMessageBox.critical(
+                self,
+                "Recording error",
+                str(exc),
+            )
 
     def save_raw_recording(self, filename: str) -> None:
         raw_spectra = np.asarray(self.recorded_raw_spectra, dtype=np.uint16)
