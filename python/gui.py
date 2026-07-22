@@ -1,813 +1,791 @@
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QComboBox, QDialog, QHBoxLayout,
-    QPushButton, QLabel, QLineEdit, QCheckBox, QSpinBox, QGroupBox, QMessageBox, QDialogButtonBox,
-    QFormLayout, QScrollArea, QFileDialog, QSlider,)
-from datetime import datetime
-from PySide6.QtCore import Qt, Slot
-from signalprocessor import SignalProcessor
-from spectrometer import SpectrometerDriver, SpectrometerDriverMock
-from adquisition import AcquisitionThread
-from help_messages import *
-import pyqtgraph as pg
-from serial.tools import list_ports
-import numpy as np   
-from pathlib import Path
+from __future__ import annotations
+
 import json
-from signalprocessor import (USEFUL_CCD_PIXELS)
-from gpiozero import OutputDevice
-      
-class CalibrationDialog(QDialog):
-    def __init__(self, coefficients=None, parent=None):
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
+
+import numpy as np
+import pyqtgraph as pg
+from PySide6.QtCore import QElapsedTimer, QTimer, Qt, Slot
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from serial.tools import list_ports
+
+from adquisition import AcquisitionThread
+from signalprocessor import SignalProcessor, USEFUL_CCD_PIXELS
+from spectrometer import SpectrometerDriver, SpectrometerDriverMock
+
+try:
+    from gpiozero import OutputDevice
+except ImportError:
+    OutputDevice = None
+
+
+# Reference wavelengths can be edited or moved to a JSON/CSV file later.
+# The intensity value is only used to choose which lines are shown first.
+NEON_REFERENCE_LINES = [
+    (540.056, 0.30),
+    (556.277, 0.20),
+    (565.666, 0.35),
+    (571.922, 0.45),
+    (574.830, 0.30),
+    (576.442, 0.35),
+    (580.445, 0.45),
+    (585.249, 1.00),
+    (588.190, 0.55),
+    (594.483, 0.75),
+    (597.553, 0.40),
+    (602.999, 0.65),
+    (607.434, 0.50),
+    (609.616, 0.45),
+    (614.306, 0.80),
+    (616.359, 0.55),
+    (621.728, 0.70),
+    (626.650, 0.65),
+    (630.479, 0.35),
+    (633.443, 0.60),
+    (638.299, 0.65),
+    (640.225, 0.45),
+]
+
+
+class NeonCalibrationDialog(QDialog):
+    """Interactive wavelength calibration using draggable neon lines."""
+
+    DEFAULT_ANCHOR_PIXEL = 1615.0
+    DEFAULT_ANCHOR_WAVELENGTH = 585.249
+    DEFAULT_DISPERSION_NM_PER_PIXEL = 0.030
+
+    def __init__(
+        self,
+        spectrum: np.ndarray,
+        coefficients: np.ndarray | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
 
-        self.setWindowTitle("Wavelength Calibration")
-        self.setMinimumWidth(380)
-
-        self.coefficients = None
-
-        layout = QVBoxLayout(self)
-
-        equation_label = QLabel(
-            "λ(x) = a₂·x² + a₁·x + a₀"
+        self.spectrum = np.asarray(spectrum, dtype=float).copy()
+        self.initial_coefficients = (
+            None if coefficients is None else np.asarray(coefficients, dtype=float).copy()
         )
-        layout.addWidget(equation_label)
+        self.coefficients: np.ndarray | None = None
+        self.line_items: list[pg.InfiniteLine] = []
+        self.assigned_points: dict[float, float] = {}
 
-        form_layout = QFormLayout()
+        self.setWindowTitle("Interactive neon calibration")
+        self.resize(1050, 720)
 
-        self.edit_a2 = QLineEdit()
-        self.edit_a1 = QLineEdit()
-        self.edit_a0 = QLineEdit()
+        self._build_ui()
+        self._create_reference_lines()
+        self._refresh_table_and_fit()
 
-        self.edit_a2.setPlaceholderText("Quadratic coefficient")
-        self.edit_a1.setPlaceholderText("Linear coefficient")
-        self.edit_a0.setPlaceholderText("Constant coefficient")
+    def _build_ui(self) -> None:
+        main_layout = QVBoxLayout(self)
 
-        form_layout.addRow("a₂:", self.edit_a2)
-        form_layout.addRow("a₁:", self.edit_a1)
-        form_layout.addRow("a₀:", self.edit_a0)
+        instructions = QLabel(
+            "Drag an orange neon line near the matching measured peak. "
+            "When released, it snaps to the local maximum and becomes green."
+        )
+        instructions.setWordWrap(True)
+        main_layout.addWidget(instructions)
 
-        layout.addLayout(form_layout)
+        self.plot_widget = pg.PlotWidget(title="Measured spectrum and neon reference")
+        self.plot_widget.setLabel("left", "Intensity")
+        self.plot_widget.setLabel("bottom", "Pixel")
+        self.plot_widget.showGrid(x=True, y=True, alpha=0.25)
+        self.plot_widget.plot(
+            np.arange(self.spectrum.size),
+            self.spectrum,
+            pen=pg.mkPen("b", width=2),
+        )
+        main_layout.addWidget(self.plot_widget, stretch=1)
 
-        if coefficients is not None:
-            self.edit_a2.setText(f"{coefficients[0]:.12g}")
-            self.edit_a1.setText(f"{coefficients[1]:.12g}")
-            self.edit_a0.setText(f"{coefficients[2]:.12g}")
+        controls = QHBoxLayout()
+
+        self.spin_snap_radius = QSpinBox()
+        self.spin_snap_radius.setRange(1, 100)
+        self.spin_snap_radius.setValue(15)
+        controls.addWidget(QLabel("Snap radius (pixels):"))
+        controls.addWidget(self.spin_snap_radius)
+
+        self.combo_degree = QComboBox()
+        self.combo_degree.addItem("Linear", 1)
+        self.combo_degree.addItem("Quadratic", 2)
+        controls.addWidget(QLabel("Fit:"))
+        controls.addWidget(self.combo_degree)
+
+        self.btn_reset_positions = QPushButton("Reset line positions")
+        self.btn_reset_positions.clicked.connect(self._reset_line_positions)
+        controls.addWidget(self.btn_reset_positions)
+
+        self.btn_clear_assignments = QPushButton("Clear assignments")
+        self.btn_clear_assignments.clicked.connect(self._clear_assignments)
+        controls.addWidget(self.btn_clear_assignments)
+
+        controls.addStretch()
+        main_layout.addLayout(controls)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(
+            ["Neon wavelength (nm)", "Pixel", "Calculated (nm)", "Residual (nm)"]
+        )
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setMaximumHeight(190)
+        main_layout.addWidget(self.table)
+
+        self.lbl_fit = QLabel("Assign at least two lines to calculate a calibration.")
+        self.lbl_fit.setWordWrap(True)
+        main_layout.addWidget(self.lbl_fit)
+
+        button_row = QHBoxLayout()
+
+        self.btn_manual = QPushButton("Enter coefficients manually...")
+        self.btn_manual.clicked.connect(self._enter_coefficients_manually)
+        button_row.addWidget(self.btn_manual)
 
         self.btn_pixel_scale = QPushButton("Use pixel scale")
-        self.btn_pixel_scale.clicked.connect(
-            self.use_pixel_scale
-        )
-        layout.addWidget(self.btn_pixel_scale)
+        self.btn_pixel_scale.clicked.connect(self._use_pixel_scale)
+        button_row.addWidget(self.btn_pixel_scale)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok |
-            QDialogButtonBox.Cancel
-        )
+        button_row.addStretch()
 
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        button_row.addWidget(buttons)
 
-        layout.addWidget(buttons)
+        main_layout.addLayout(button_row)
 
-    def accept(self):
-        texts = [
-            self.edit_a2.text().strip(),
-            self.edit_a1.text().strip(),
-            self.edit_a0.text().strip(),
+    def _create_reference_lines(self) -> None:
+        for wavelength, relative_intensity in NEON_REFERENCE_LINES:
+            pixel = self._initial_pixel_for_wavelength(wavelength)
+            if not 0 <= pixel < self.spectrum.size:
+                continue
+
+            line = pg.InfiniteLine(
+                pos=pixel,
+                angle=90,
+                movable=True,
+                pen=pg.mkPen((255, 140, 0), width=1.5, style=Qt.DashLine),
+                hoverPen=pg.mkPen((255, 100, 0), width=3),
+                label=f"{wavelength:.3f}",
+                labelOpts={"position": min(0.95, 0.68 + 0.25 * relative_intensity)},
+            )
+            line.neon_wavelength = wavelength
+            line.initial_pixel = pixel
+            line.assigned = False
+            line.sigPositionChangeFinished.connect(
+                lambda moved_line=line: self._on_line_released(moved_line)
+            )
+
+            self.plot_widget.addItem(line)
+            self.line_items.append(line)
+
+    def _initial_pixel_for_wavelength(self, wavelength: float) -> float:
+        if self.initial_coefficients is not None:
+            pixel = self._invert_calibration(wavelength, self.initial_coefficients)
+            if pixel is not None:
+                return pixel
+
+        return self.DEFAULT_ANCHOR_PIXEL + (
+            wavelength - self.DEFAULT_ANCHOR_WAVELENGTH
+        ) / self.DEFAULT_DISPERSION_NM_PER_PIXEL
+
+    def _invert_calibration(
+        self,
+        wavelength: float,
+        coefficients: np.ndarray,
+    ) -> float | None:
+        a2, a1, a0 = coefficients
+
+        if np.isclose(a2, 0.0):
+            if np.isclose(a1, 0.0):
+                return None
+            return float((wavelength - a0) / a1)
+
+        roots = np.roots([a2, a1, a0 - wavelength])
+        valid = [
+            float(root.real)
+            for root in roots
+            if abs(root.imag) < 1e-8 and 0 <= root.real < self.spectrum.size
         ]
+        return valid[0] if valid else None
 
-        if not any(texts):
-            QMessageBox.warning(
-                self,
-                "Calibration error",
-                "Enter at least one calibration coefficient.",
+    def _on_line_released(self, line: pg.InfiniteLine) -> None:
+        snapped_pixel = self._find_local_maximum(
+            line.value(),
+            self.spin_snap_radius.value(),
+        )
+        line.setValue(snapped_pixel)
+        line.setPen(pg.mkPen((0, 150, 70), width=2.5))
+        line.assigned = True
+
+        self.assigned_points[line.neon_wavelength] = snapped_pixel
+        self._refresh_table_and_fit()
+
+    def _find_local_maximum(self, approximate_pixel: float, radius: int) -> float:
+        center = int(round(approximate_pixel))
+        left = max(0, center - radius)
+        right = min(self.spectrum.size, center + radius + 1)
+
+        if right <= left:
+            return float(np.clip(center, 0, self.spectrum.size - 1))
+
+        local = self.spectrum[left:right]
+        return float(left + int(np.argmax(local)))
+
+    def _fit_coefficients(self) -> np.ndarray | None:
+        degree = int(self.combo_degree.currentData())
+        minimum_points = degree + 1
+
+        if len(self.assigned_points) < minimum_points:
+            return None
+
+        wavelengths = np.asarray(list(self.assigned_points.keys()), dtype=float)
+        pixels = np.asarray(list(self.assigned_points.values()), dtype=float)
+        fitted = np.polyfit(pixels, wavelengths, degree)
+
+        if degree == 1:
+            a1, a0 = fitted
+            return np.asarray([0.0, a1, a0], dtype=float)
+
+        return np.asarray(fitted, dtype=float)
+
+    def _refresh_table_and_fit(self) -> None:
+        self.coefficients = self._fit_coefficients()
+        points = sorted(self.assigned_points.items())
+        self.table.setRowCount(len(points))
+
+        residuals = []
+        for row, (wavelength, pixel) in enumerate(points):
+            calculated = np.nan
+            residual = np.nan
+
+            if self.coefficients is not None:
+                calculated = float(np.polyval(self.coefficients, pixel))
+                residual = calculated - wavelength
+                residuals.append(residual)
+
+            values = [
+                f"{wavelength:.3f}",
+                f"{pixel:.1f}",
+                "—" if np.isnan(calculated) else f"{calculated:.4f}",
+                "—" if np.isnan(residual) else f"{residual:+.4f}",
+            ]
+
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, column, item)
+
+        degree = int(self.combo_degree.currentData())
+        minimum_points = degree + 1
+
+        if self.coefficients is None:
+            self.lbl_fit.setText(
+                f"Assigned lines: {len(points)}. "
+                f"A {self.combo_degree.currentText().lower()} fit requires "
+                f"at least {minimum_points}."
             )
             return
 
-        try:
-            a2 = float(texts[0]) if texts[0] else 0.0
-            a1 = float(texts[1]) if texts[1] else 0.0
-            a0 = float(texts[2]) if texts[2] else 0.0
-
-        except ValueError:
-            QMessageBox.warning(
-                self,
-                "Calibration error",
-                "Calibration coefficients must be valid numbers.",
-            )
-            return
-
-        if a2 == 0.0 and a1 == 0.0:
-            QMessageBox.warning(
-                self,
-                "Calibration error",
-                "At least a₁ or a₂ must be different from zero.",
-            )
-            return
-
-        self.coefficients = np.array(
-            [a2, a1, a0],
-            dtype=float,
+        a2, a1, a0 = self.coefficients
+        rms = float(np.sqrt(np.mean(np.square(residuals)))) if residuals else 0.0
+        self.lbl_fit.setText(
+            f"λ(x) = {a2:.6g}·x² + {a1:.6g}·x + {a0:.6g}    "
+            f"RMS residual: {rms:.5f} nm"
         )
 
-        super().accept()
+    def _reset_line_positions(self) -> None:
+        self.assigned_points.clear()
+        for line in self.line_items:
+            line.setValue(line.initial_pixel)
+            line.setPen(pg.mkPen((255, 140, 0), width=1.5, style=Qt.DashLine))
+            line.assigned = False
+        self._refresh_table_and_fit()
 
-    def use_pixel_scale(self):
+    def _clear_assignments(self) -> None:
+        self.assigned_points.clear()
+        for line in self.line_items:
+            line.setPen(pg.mkPen((255, 140, 0), width=1.5, style=Qt.DashLine))
+            line.assigned = False
+        self._refresh_table_and_fit()
+
+    def _enter_coefficients_manually(self) -> None:
+        dialog = ManualCalibrationDialog(self.initial_coefficients, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.coefficients = dialog.coefficients
+            super().accept()
+
+    def _use_pixel_scale(self) -> None:
         self.coefficients = None
         super().accept()
 
-###############################################################################
-###############################################################################
-from PySide6.QtCore import QElapsedTimer, QTimer
-        
+    def accept(self) -> None:
+        self.coefficients = self._fit_coefficients()
+        if self.coefficients is None:
+            QMessageBox.warning(
+                self,
+                "Calibration",
+                "There are not enough assigned neon lines for the selected fit.",
+            )
+            return
+        super().accept()
+
+
+class ManualCalibrationDialog(QDialog):
+    """Small fallback dialog for direct coefficient entry."""
+
+    def __init__(
+        self,
+        coefficients: np.ndarray | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.coefficients: np.ndarray | None = None
+        self.setWindowTitle("Manual wavelength calibration")
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.edits = [QLineEdit(), QLineEdit(), QLineEdit()]
+        for label, edit in zip(("a₂:", "a₁:", "a₀:"), self.edits):
+            form.addRow(label, edit)
+
+        if coefficients is not None:
+            for edit, value in zip(self.edits, coefficients):
+                edit.setText(f"{value:.12g}")
+
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept(self) -> None:
+        try:
+            values = [float(edit.text().strip() or 0.0) for edit in self.edits]
+        except ValueError:
+            QMessageBox.warning(self, "Calibration", "Coefficients must be numbers.")
+            return
+
+        if np.isclose(values[0], 0.0) and np.isclose(values[1], 0.0):
+            QMessageBox.warning(self, "Calibration", "a₁ or a₂ must be non-zero.")
+            return
+
+        self.coefficients = np.asarray(values, dtype=float)
+        super().accept()
+
+
 class RamanGUI(QMainWindow):
-    ###########################################################################
-    # CONSTRUCTOR AND INITIALIZATION
-    ###########################################################################
-    def __init__(self):
+    """Main Raman spectrometer window."""
+
+    def __init__(self) -> None:
         super().__init__()
-        self.laser = OutputDevice(17, active_high=False, initial_value=False) # GPIO17, LOW = encendido, empieza apagado
+
         self.setWindowTitle("Spectrometer Raman - Control Panel")
-        self.resize(1000, 600)
+        self.resize(1100, 680)
+
+        self.processor = SignalProcessor()
+        self.dev = None
+        self.worker = None
+        self.laser = self._create_laser_output()
 
         self.peaks_enabled = False
         self.peak_labels_enabled = False
-        self.peak_labels = []
-
-        self.dev = None
-        self.worker = None
-        self.processor = SignalProcessor()
+        self.peak_labels: list[pg.TextItem] = []
 
         self.is_recording = False
-        self.recorded_raw_spectra = []
+        self.recorded_raw_spectra: list[np.ndarray] = []
 
-        self.imported_raw_spectra = None
         self.data_source = "live"
+        self.imported_raw_spectra: np.ndarray | None = None
+        self.imported_spectrum_index = 0
 
-        # None significa que el eje X se muestra en píxeles.
-        # Si hay calibración, contiene [a2, a1, a0].
-        self.wavelength_coefficients = None
+        self.frame_counter = 0
+        self.packet_timer = QElapsedTimer()
+        self.acquisition_ui_timer = QTimer(self)
+        self.acquisition_ui_timer.setInterval(100)
+        self.acquisition_ui_timer.timeout.connect(self.update_acquisition_status)
 
-        self.calibration_path = (
-            Path(__file__).parent / "calibration.json"
-        )
+        self.wavelength_coefficients: np.ndarray | None = None
+        self.calibration_path = Path(__file__).parent / "calibration.json"
 
-        self.setup_ui()
+        self._build_ui()
         self.load_wavelength_calibration()
 
-    ###########################################################################
-    # GUI SETUP
-    ###########################################################################
-    def reset_frame_counter(self):
-        self.frame_counter = 0
-        
-    def setup_ui(self):
-        # Central widget and main layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+    def _build_ui(self) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QHBoxLayout(central)
 
-        ##########################################################################
-        # LEFT PANEL (CONTROLS)
-        #########################################################################
-        control_widget = QWidget()
-        control_widget.setMinimumWidth(245)
-        control_layout = QVBoxLayout(control_widget)
+        control_panel = QWidget()
+        control_panel.setMinimumWidth(245)
+        controls = QVBoxLayout(control_panel)
 
-        #########################################################################
-        # CONNECTION GROUP
-        group_conn = QGroupBox("Connection")
-        conn_layout = QVBoxLayout()
+        for group in (
+            self._build_connection_group(),
+            self._build_device_group(),
+            self._build_acquisition_group(),
+            self._build_processing_group(),
+            self._build_calibration_group(),
+            self._build_data_group(),
+        ):
+            controls.addWidget(group)
+        controls.addStretch()
 
-        port_layout = QHBoxLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(control_panel)
+        scroll.setFixedWidth(285)
 
+        layout.addWidget(scroll)
+        layout.addWidget(self._build_plot_widget(), stretch=1)
+
+    def _build_connection_group(self) -> QGroupBox:
+        group = QGroupBox("Connection")
+        layout = QVBoxLayout(group)
+
+        port_row = QHBoxLayout()
         self.port_input = QComboBox()
         self.btn_refresh_ports = QPushButton("Refresh")
         self.btn_refresh_ports.clicked.connect(self.refresh_ports)
-
-        port_layout.addWidget(self.port_input)
-        port_layout.addWidget(self.btn_refresh_ports)
+        port_row.addWidget(self.port_input)
+        port_row.addWidget(self.btn_refresh_ports)
 
         self.btn_connect = QPushButton("Connect")
         self.btn_connect.clicked.connect(self.connect_device)
 
-        conn_layout.addWidget(QLabel("Serial port:"))
-        conn_layout.addLayout(port_layout)
-        conn_layout.addWidget(self.btn_connect)
-
-        group_conn.setLayout(conn_layout)
+        layout.addWidget(QLabel("Serial port:"))
+        layout.addLayout(port_row)
+        layout.addWidget(self.btn_connect)
         self.refresh_ports()
+        return group
 
-        ########################################################################
-        # COMMANDS GROUP
-        group_cmds = QGroupBox("STM32 configuration")
-        cmds_layout = QVBoxLayout()
-        
-        # Tiempo de integración
-        self.spin_time = QSpinBox()
-        self.spin_time.setRange(0.001, 100000)
-        self.spin_time.setValue(100)
-        self.btn_time = QPushButton("Set Integration Time (ms)")
-        self.btn_time.clicked.connect(lambda: self.send_cmd('time'))
-        cmds_layout.addWidget(self.spin_time)
-        cmds_layout.addWidget(self.btn_time)
-        
-        # Acumulaciones
-        #self.spin_accum = QSpinBox()
-        #self.spin_accum.setRange(1, 1000)
-        #self.spin_accum.setValue(50)
-        #self.btn_accum = QPushButton("Set Accumulations")
-        #self.btn_accum.clicked.connect(lambda: self.send_cmd('accum'))
-        #cmds_layout.addWidget(self.spin_accum)
-        #cmds_layout.addWidget(self.btn_accum)
+    def _build_device_group(self) -> QGroupBox:
+        group = QGroupBox("STM32 configuration")
+        layout = QVBoxLayout(group)
 
-        # Skip
+        self.spin_time = QDoubleSpinBox()
+        self.spin_time.setRange(0.001, 100000.0)
+        self.spin_time.setDecimals(3)
+        self.spin_time.setValue(100.0)
+        self.spin_time.setSuffix(" ms")
+        layout.addWidget(self.spin_time)
+        layout.addWidget(self._button("Set integration time", lambda: self.send_cmd("time")))
+
         self.spin_skip = QSpinBox()
         self.spin_skip.setRange(0, 1000)
-        self.spin_skip.setValue(0)
-        self.btn_skip = QPushButton("Set Skip Counter")
-        self.btn_skip.clicked.connect(lambda: self.send_cmd('skip'))
-        cmds_layout.addWidget(self.spin_skip)
-        cmds_layout.addWidget(self.btn_skip)
+        layout.addWidget(self.spin_skip)
+        layout.addWidget(self._button("Set skip counter", lambda: self.send_cmd("skip")))
 
-        # Reset
-        self.btn_reset = QPushButton("Reset Device")
-        self.btn_reset.setStyleSheet("background-color: #ffcccc;")
-        self.btn_reset.clicked.connect(lambda: self.send_cmd('reset'))
-        cmds_layout.addWidget(self.btn_reset)
+        btn_reset = self._button("Reset device", lambda: self.send_cmd("reset"))
+        btn_reset.setStyleSheet("background-color: #ffcccc;")
+        layout.addWidget(btn_reset)
+        layout.addWidget(self._button("Toggle LED", lambda: self.send_cmd("toggle_led")))
 
-        # Toggle LED
-        self.btn_toggle_led = QPushButton("Toggle LED")
-        self.btn_toggle_led.clicked.connect(lambda: self.send_cmd('toggle_led'))
-        cmds_layout.addWidget(self.btn_toggle_led)   
-
-        # Laser
         self.btn_laser = QPushButton("Laser OFF")
         self.btn_laser.setCheckable(True)
-        self.btn_laser.setChecked(False)
-        self.btn_laser.clicked.connect(self.set_laser_state)
-        cmds_layout.addWidget(self.btn_laser)
+        self.btn_laser.toggled.connect(self.set_laser_state)
+        layout.addWidget(self.btn_laser)
+        return group
 
-        # GROUP    
-        group_cmds.setLayout(cmds_layout)
+    def _build_acquisition_group(self) -> QGroupBox:
+        group = QGroupBox("Continuous acquisition")
+        layout = QVBoxLayout(group)
 
-        ########################################################################
-        # ADQUISITION GROUP
-        group_acq = QGroupBox("Continuous Acquisition")
-        acq_layout = QVBoxLayout()
-        self.btn_start = QPushButton("Start Reading")
+        self.btn_start = QPushButton("Start reading")
         self.btn_start.setStyleSheet("background-color: #ccffcc;")
+        self.btn_start.setEnabled(False)
         self.btn_start.clicked.connect(self.toggle_acquisition)
-        self.btn_start.setEnabled(False) # Deshabilitado hasta conectar
-        acq_layout.addWidget(self.btn_start)
 
-        self.btn_dark = QPushButton("Capture Dark")
+        self.btn_dark = QPushButton("Capture dark")
         self.btn_dark.setEnabled(False)
         self.btn_dark.clicked.connect(self.start_dark_capture)
 
         self.frame_label = QLabel("Frame: 0")
-        self.frame_time_label = QLabel("Next frame: 0.00 s")
-
-        self.btn_reset_frame_counter = QPushButton("Reset Frame Counter")
-        self.btn_reset_frame_counter.clicked.connect(self.reset_frame_counter)
-
-        acq_layout.addWidget(self.btn_dark)
-        acq_layout.addWidget(self.btn_reset_frame_counter)
+        self.frame_time_label = QLabel("Since last frame: 0.00 s")
         self.lbl_dark_status = QLabel("Dark: not acquired")
-        acq_layout.addWidget(self.lbl_dark_status)
-        acq_layout.addWidget(self.frame_label)
-        acq_layout.addWidget(self.frame_time_label)
 
-        group_acq.setLayout(acq_layout)
+        layout.addWidget(self.btn_start)
+        layout.addWidget(self.btn_dark)
+        layout.addWidget(self._button("Reset frame counter", self.reset_frame_counter))
+        layout.addWidget(self.lbl_dark_status)
+        layout.addWidget(self.frame_label)
+        layout.addWidget(self.frame_time_label)
+        return group
 
+    def _build_processing_group(self) -> QGroupBox:
+        group = QGroupBox("Processing")
+        layout = QVBoxLayout(group)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
-        ########################################################################
-        # SIGNAL PROCESSING GROUP
-        group_processing = QGroupBox("Processing")
-        processing_layout = QVBoxLayout()
-
-        processing_form = QFormLayout()
-        processing_form.setFieldGrowthPolicy(
-            QFormLayout.AllNonFixedFieldsGrow
-        )
-
-        # ---------------------------------------------------------------------
-        # Dark subtraction
-        # ---------------------------------------------------------------------
-        self.checkbox_dark_subtraction = QCheckBox()
-        self.checkbox_dark_subtraction.setChecked(
-            self.processor.enable_dark_subtraction
-        )
-        self.checkbox_dark_subtraction.toggled.connect(
-            lambda checked: self.update_processing_toggle(
-                self.processor.set_enable_dark_subtraction,
-                checked,
-            )
-        )
-        processing_form.addRow(
+        self.checkbox_dark_subtraction = self._add_toggle(
+            form,
             "Dark subtraction:",
-            self.checkbox_dark_subtraction,
+            self.processor.enable_dark_subtraction,
+            self.processor.set_enable_dark_subtraction,
+        )
+        self.edit_dark_n_samples = self._add_processing_edit(
+            form, "Dark samples:", "dark_n_samples", self.processor.set_dark_n_samples
         )
 
-        self.edit_dark_n_samples = QLineEdit(
-            str(self.processor.dark_n_samples)
-        )
-        self.edit_dark_n_samples.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_dark_n_samples,
-                self.processor.set_dark_n_samples,
-                "dark_n_samples",
-            )
-        )
-        processing_form.addRow(
-            "Dark samples:",
-            self.edit_dark_n_samples,
-        )
-
-        # ---------------------------------------------------------------------
-        # Spike correction
-        # ---------------------------------------------------------------------
-        self.checkbox_spike_correction = QCheckBox()
-        self.checkbox_spike_correction.setChecked(
-            self.processor.enable_spike_correction
-        )
-        self.checkbox_spike_correction.toggled.connect(
-            lambda checked: self.update_processing_toggle(
-                self.processor.set_enable_spike_correction,
-                checked,
-            )
-        )
-        processing_form.addRow(
+        self.checkbox_spike_correction = self._add_toggle(
+            form,
             "Spike correction:",
-            self.checkbox_spike_correction,
+            self.processor.enable_spike_correction,
+            self.processor.set_enable_spike_correction,
         )
-
-        self.edit_spike_window = QLineEdit(
-            str(self.processor.spike_window)
+        self.edit_spike_window = self._add_processing_edit(
+            form, "Spike window:", "spike_window", self.processor.set_spike_window
         )
-        self.edit_spike_window.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_spike_window,
-                self.processor.set_spike_window,
-                "spike_window",
-            )
-        )
-        processing_form.addRow(
-            "Spike window:",
-            self.edit_spike_window,
-        )
-
-        self.edit_spike_multiplier = QLineEdit(
-            str(self.processor.spike_T_multiplier)
-        )
-        self.edit_spike_multiplier.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_spike_multiplier,
-                self.processor.set_spike_T_multiplier,
-                "spike_T_multiplier",
-            )
-        )
-        processing_form.addRow(
+        self.edit_spike_multiplier = self._add_processing_edit(
+            form,
             "Spike threshold:",
-            self.edit_spike_multiplier,
+            "spike_T_multiplier",
+            self.processor.set_spike_T_multiplier,
         )
 
-        # ---------------------------------------------------------------------
-        # Spectrum averaging
-        # ---------------------------------------------------------------------
-        self.edit_n_spectra = QLineEdit(
-            str(self.processor.n_spectra)
-        )
-        self.edit_n_spectra.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_n_spectra,
-                self.processor.set_n_spectra,
-                "n_spectra",
-            )
-        )
-        processing_form.addRow(
-            "Spectra to average:",
-            self.edit_n_spectra,
+        self.edit_n_spectra = self._add_processing_edit(
+            form, "Spectra to average:", "n_spectra", self.processor.set_n_spectra
         )
 
-        # ---------------------------------------------------------------------
-        # Savitzky-Golay filtering
-        # ---------------------------------------------------------------------
-        self.checkbox_filtering = QCheckBox()
-        self.checkbox_filtering.setChecked(
-            self.processor.enable_filtering
-        )
-        self.checkbox_filtering.toggled.connect(
-            lambda checked: self.update_processing_toggle(
-                self.processor.set_enable_filtering,
-                checked,
-            )
-        )
-        processing_form.addRow(
+        self.checkbox_filtering = self._add_toggle(
+            form,
             "Filtering:",
-            self.checkbox_filtering,
+            self.processor.enable_filtering,
+            self.processor.set_enable_filtering,
         )
-
-        self.edit_filter_window = QLineEdit(
-            str(self.processor.filter_window)
+        self.edit_filter_window = self._add_processing_edit(
+            form, "Filter window:", "filter_window", self.processor.set_filter_window
         )
-        self.edit_filter_window.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_filter_window,
-                self.processor.set_filter_window,
-                "filter_window",
-            )
-        )
-        processing_form.addRow(
-            "Filter window:",
-            self.edit_filter_window,
-        )
-
-        self.edit_filter_poly_order = QLineEdit(
-            str(self.processor.filter_poly_order)
-        )
-        self.edit_filter_poly_order.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_filter_poly_order,
-                self.processor.set_filter_poly_order,
-                "filter_poly_order",
-            )
-        )
-        processing_form.addRow(
+        self.edit_filter_poly_order = self._add_processing_edit(
+            form,
             "Polynomial order:",
-            self.edit_filter_poly_order,
+            "filter_poly_order",
+            self.processor.set_filter_poly_order,
         )
 
-        # ---------------------------------------------------------------------
-        # Baseline correction
-        # ---------------------------------------------------------------------
-        self.checkbox_baseline_correction = QCheckBox()
-        self.checkbox_baseline_correction.setChecked(
-            self.processor.enable_baseline_correction
-        )
-        self.checkbox_baseline_correction.toggled.connect(
-            lambda checked: self.update_processing_toggle(
-                self.processor.set_enable_baseline_correction,
-                checked,
-            )
-        )
-        processing_form.addRow(
+        self.checkbox_baseline_correction = self._add_toggle(
+            form,
             "Baseline correction:",
-            self.checkbox_baseline_correction,
+            self.processor.enable_baseline_correction,
+            self.processor.set_enable_baseline_correction,
         )
-
-        self.edit_baseline_lambda = QLineEdit(
-            f"{self.processor.baseline_lambda:.2e}"
-        )
-        self.edit_baseline_lambda.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_baseline_lambda,
-                self.processor.set_baseline_lambda,
-                "baseline_lambda",
-                lambda value: f"{value:.2e}",
-            )
-        )
-        processing_form.addRow(
+        self.edit_baseline_lambda = self._add_processing_edit(
+            form,
             "Baseline lambda:",
-            self.edit_baseline_lambda,
+            "baseline_lambda",
+            self.processor.set_baseline_lambda,
+            lambda value: f"{value:.2e}",
         )
-
-        self.edit_baseline_diff_order = QLineEdit(
-            str(self.processor.baseline_diff_order)
-        )
-        self.edit_baseline_diff_order.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_baseline_diff_order,
-                self.processor.set_baseline_diff_order,
-                "baseline_diff_order",
-            )
-        )
-        processing_form.addRow(
+        self.edit_baseline_diff_order = self._add_processing_edit(
+            form,
             "Difference order:",
-            self.edit_baseline_diff_order,
+            "baseline_diff_order",
+            self.processor.set_baseline_diff_order,
         )
-
-        self.edit_baseline_iterations = QLineEdit(
-            str(self.processor.baseline_iterations)
-        )
-        self.edit_baseline_iterations.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_baseline_iterations,
-                self.processor.set_baseline_iterations,
-                "baseline_iterations",
-            )
-        )
-        processing_form.addRow(
+        self.edit_baseline_iterations = self._add_processing_edit(
+            form,
             "Iterations:",
-            self.edit_baseline_iterations,
+            "baseline_iterations",
+            self.processor.set_baseline_iterations,
         )
-
-        self.edit_baseline_tolerance = QLineEdit(
-            f"{self.processor.baseline_tolerance:.2e}"
-        )
-        self.edit_baseline_tolerance.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_baseline_tolerance,
-                self.processor.set_baseline_tolerance,
-                "baseline_tolerance",
-                lambda value: f"{value:.2e}",
-            )
-        )
-        processing_form.addRow(
+        self.edit_baseline_tolerance = self._add_processing_edit(
+            form,
             "Tolerance:",
-            self.edit_baseline_tolerance,
+            "baseline_tolerance",
+            self.processor.set_baseline_tolerance,
+            lambda value: f"{value:.2e}",
         )
 
-        # ---------------------------------------------------------------------
-        # Normalization
-        # ---------------------------------------------------------------------
-        self.checkbox_normalization = QCheckBox()
-        self.checkbox_normalization.setChecked(
-            self.processor.enable_normalization
-        )
-        self.checkbox_normalization.toggled.connect(
-            lambda checked: self.update_processing_toggle(
-                self.processor.set_enable_normalization,
-                checked,
-            )
-        )
-        processing_form.addRow(
+        self.checkbox_normalization = self._add_toggle(
+            form,
             "Normalization:",
-            self.checkbox_normalization,
+            self.processor.enable_normalization,
+            self.processor.set_enable_normalization,
         )
 
-        processing_layout.addLayout(processing_form)
-
-        # ---------------------------------------------------------------------
-        # Peak visualization
-        # ---------------------------------------------------------------------
-        self.btn_find_peaks = QPushButton("Show peaks")
-        self.btn_find_peaks.clicked.connect(self.toggle_find_peaks)
-        processing_layout.addWidget(self.btn_find_peaks)
-
-        self.btn_peak_labels = QPushButton("Show peak labels")
-        self.btn_peak_labels.clicked.connect(self.toggle_peak_labels)
-        self.btn_peak_labels.setEnabled(False)
-        processing_layout.addWidget(self.btn_peak_labels)
-
-        self.btn_restore_processing = QPushButton(
-            "Restore processing defaults"
-        )
-        self.btn_restore_processing.clicked.connect(
-            self.restore_processing_defaults
-        )
-        processing_layout.addWidget(self.btn_restore_processing)
-
-        # ---------------------------------------------------------------------
-        # Peak detection
-        # ---------------------------------------------------------------------
-        self.edit_peak_prominence = QLineEdit(
-            str(self.processor.peak_prominence_factor)
-        )
-        self.edit_peak_prominence.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_peak_prominence,
-                self.processor.set_peak_prominence_factor,
-                "peak_prominence_factor",
-            )
-        )
-        processing_form.addRow(
+        self.edit_peak_prominence = self._add_processing_edit(
+            form,
             "Peak prominence (σ):",
-            self.edit_peak_prominence,
+            "peak_prominence_factor",
+            self.processor.set_peak_prominence_factor,
         )
-
-        self.edit_peak_min_distance = QLineEdit(
-            str(self.processor.peak_min_distance)
-        )
-        self.edit_peak_min_distance.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_peak_min_distance,
-                self.processor.set_peak_min_distance,
-                "peak_min_distance",
-            )
-        )
-        processing_form.addRow(
+        self.edit_peak_min_distance = self._add_processing_edit(
+            form,
             "Peak distance:",
-            self.edit_peak_min_distance,
+            "peak_min_distance",
+            self.processor.set_peak_min_distance,
         )
-
-        self.edit_peak_min_width = QLineEdit(
-            str(self.processor.peak_min_width)
-        )
-        self.edit_peak_min_width.editingFinished.connect(
-            lambda: self.update_processing_value(
-                self.edit_peak_min_width,
-                self.processor.set_peak_min_width,
-                "peak_min_width",
-            )
-        )
-        processing_form.addRow(
+        self.edit_peak_min_width = self._add_processing_edit(
+            form,
             "Peak width:",
-            self.edit_peak_min_width,
+            "peak_min_width",
+            self.processor.set_peak_min_width,
         )
 
+        layout.addLayout(form)
 
-        group_processing.setLayout(processing_layout)
+        self.btn_find_peaks = self._button("Show peaks", self.toggle_find_peaks)
+        self.btn_peak_labels = self._button("Show peak labels", self.toggle_peak_labels)
+        self.btn_peak_labels.setEnabled(False)
+        layout.addWidget(self.btn_find_peaks)
+        layout.addWidget(self.btn_peak_labels)
+        layout.addWidget(self._button("Restore processing defaults", self.restore_processing_defaults))
+        return group
 
-        ########################################################################
-        # CALIBRATION GROUP
-        group_calibration = QGroupBox("Calibration")
-        calibration_layout = QVBoxLayout()
-
-        self.lbl_calibration_status = QLabel(
-            "Scale: pixels"
+    def _build_calibration_group(self) -> QGroupBox:
+        group = QGroupBox("Calibration")
+        layout = QVBoxLayout(group)
+        self.lbl_calibration_status = QLabel("Scale: pixels")
+        self.btn_calibration = self._button(
+            "Interactive neon calibration...", self.open_calibration_dialog
         )
-        calibration_layout.addWidget(
-            self.lbl_calibration_status
-        )
+        layout.addWidget(self.lbl_calibration_status)
+        layout.addWidget(self.btn_calibration)
+        return group
 
-        self.btn_calibration = QPushButton(
-            "Wavelength calibration..."
-        )
-        self.btn_calibration.clicked.connect(
-            self.open_calibration_dialog
-        )
-        calibration_layout.addWidget(
-            self.btn_calibration
-        )
+    def _build_data_group(self) -> QGroupBox:
+        group = QGroupBox("Data")
+        layout = QVBoxLayout(group)
 
-        group_calibration.setLayout(
-            calibration_layout
-        )
-
-        ########################################################################
-        # DATA GROUP
-        group_data = QGroupBox("Data")
-        data_layout = QVBoxLayout()
-
-        self.btn_record = QPushButton("Start recording")
+        self.btn_record = self._button("Start recording", self.toggle_recording)
         self.btn_record.setEnabled(False)
-        self.btn_record.clicked.connect(
-            self.toggle_recording
-        )
-        data_layout.addWidget(self.btn_record)
+        self.lbl_recording_status = QLabel("Not recording")
 
-        self.lbl_recording_status = QLabel(
-            "Not recording"
-        )
-        data_layout.addWidget(
-            self.lbl_recording_status
-        )
+        self.btn_import_raw = self._button("Import raw data...", self.import_raw_data)
 
-        self.btn_import_raw = QPushButton(
-            "Import raw data..."
-        )
-        self.btn_import_raw.clicked.connect(
-            self.import_raw_data
-        )
-        data_layout.addWidget(
-            self.btn_import_raw
-        )
-
-        self.slider_imported = QSlider(
-            Qt.Horizontal
-        )
-
-        self.slider_imported.setMinimum(0)
-        self.slider_imported.setMaximum(0)
-        self.slider_imported.setValue(0)
-        self.slider_imported.setEnabled(False)
-
-        # Flechas: de a 1
+        self.slider_imported = QSlider(Qt.Horizontal)
+        self.slider_imported.setRange(0, 0)
         self.slider_imported.setSingleStep(1)
-
-        # Page Up / Page Down: de a 10
         self.slider_imported.setPageStep(10)
+        self.slider_imported.setEnabled(False)
+        self.slider_imported.valueChanged.connect(self.show_imported_spectrum)
 
-        self.slider_imported.valueChanged.connect(
-            self.show_imported_spectrum
-        )
-
-        data_layout.addWidget(
-            self.slider_imported
-        )
-
-        self.lbl_imported_position = QLabel(
-            "No imported data"
-        )
-
-        data_layout.addWidget(
-            self.lbl_imported_position
-        )
-        self.btn_return_live = QPushButton(
-            "Return to live data"
-        )
-        self.btn_return_live.clicked.connect(
-            self.return_to_live_data
-        )
+        self.lbl_imported_position = QLabel("No imported data")
+        self.btn_return_live = self._button("Return to live data", self.return_to_live_data)
         self.btn_return_live.setEnabled(False)
-        data_layout.addWidget(
-            self.btn_return_live
-        )
 
-        group_data.setLayout(data_layout)
+        for widget in (
+            self.btn_record,
+            self.lbl_recording_status,
+            self.btn_import_raw,
+            self.slider_imported,
+            self.lbl_imported_position,
+            self.btn_return_live,
+        ):
+            layout.addWidget(widget)
+        return group
 
-        ########################################################################
-        # Construct the left panel
-        control_layout.addWidget(group_conn)
-        control_layout.addWidget(group_cmds)
-        control_layout.addWidget(group_acq)
-        control_layout.addWidget(group_processing)
-        control_layout.addWidget(group_calibration)
-        control_layout.addWidget(group_data)
-        control_layout.addStretch()
+    def _build_plot_widget(self) -> pg.PlotWidget:
+        pg.setConfigOption("background", "w")
+        pg.setConfigOption("foreground", "k")
 
-        ##########################################################################
-        # RIGHT PANEL (GRAPH)
-        #########################################################################
-        pg.setConfigOption('background', 'w')
-        pg.setConfigOption('foreground', 'k')
-        self.plot_widget = pg.PlotWidget(title="Spectrum in Real Time")
-        self.plot_widget.setLabel('left', 'Intensity (ADC)', units='')
-        self.plot_widget.setLabel('bottom', 'Pixel', units='')
-        self.plot_widget.setYRange(-50, 4200) # Límite del ADC
-        self.plot_widget.setXRange(0, USEFUL_CCD_PIXELS)
+        self.plot_widget = pg.PlotWidget(title="Spectrum in real time")
+        self.plot_widget.setLabel("left", "Intensity (ADC)")
+        self.plot_widget.setLabel("bottom", "Pixel")
+        self.plot_widget.setYRange(-50, 4200)
+        self.plot_widget.setXRange(0, USEFUL_CCD_PIXELS - 1)
         self.plot_widget.showGrid(x=True, y=True)
-        
-        self.curve = self.plot_widget.plot(pen=pg.mkPen('b', width=2)) # Curva azul
 
+        self.curve = self.plot_widget.plot(pen=pg.mkPen("b", width=2))
         self.peaks_curve = self.plot_widget.plot(
             pen=None,
-            symbol='o',
+            symbol="o",
             symbolSize=8,
-            symbolBrush='r'
+            symbolBrush="r",
         )
+        return self.plot_widget
 
-        control_scroll = QScrollArea()
-        control_scroll.setWidgetResizable(True)
-        control_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarAlwaysOff
-        )
-        control_scroll.setWidget(control_widget)
-        control_scroll.setFixedWidth(270)
+    @staticmethod
+    def _button(text: str, callback: Callable) -> QPushButton:
+        button = QPushButton(text)
+        button.clicked.connect(callback)
+        return button
 
-        main_layout.addWidget(control_scroll)
-        main_layout.addWidget(self.plot_widget)
-
-    def update_acquisition_status(self) -> None:
-        elapsed_s = self.packet_timer.elapsed() / 1000.0
-        integration_s = self.dev.int_time_us / 1000000.0
-
-        if integration_s > 0:
-            remaining_s = max(0.0, integration_s - elapsed_s)
-            self.frame_time_label.setText(f"Since last frame: {elapsed_s:.2f} s")
-
-    def show_imported_spectrum(self, index):
-        if self.imported_raw_spectra is None:
-            return
-
-        total = len(
-            self.imported_raw_spectra
-        )
-
-        if total == 0:
-            return
-
-        index = max(
-            0,
-            min(
-                int(index),
-                total - 1,
-            ),
-        )
-
-        self.imported_spectrum_index = index
-
-        raw_spectrum = (
-            self.imported_raw_spectra[index]
-        )
-
-        processed = (
-            self.processor.process_single_spectrum(
-                raw_spectrum
+    def _add_toggle(
+        self,
+        form: QFormLayout,
+        label: str,
+        current_value: bool,
+        setter: Callable[[bool], None],
+    ) -> QCheckBox:
+        checkbox = QCheckBox()
+        checkbox.setChecked(current_value)
+        checkbox.toggled.connect(
+            lambda checked, selected_setter=setter: self.update_processing_toggle(
+                selected_setter, checked
             )
         )
+        form.addRow(label, checkbox)
+        return checkbox
 
-        processed, _, _, _ = (
-            self.processor.process_spectrum_batch(
-                [processed]
+    def _add_processing_edit(
+        self,
+        form: QFormLayout,
+        label: str,
+        attribute_name: str,
+        setter: Callable,
+        formatter: Callable = str,
+    ) -> QLineEdit:
+        edit = QLineEdit(formatter(getattr(self.processor, attribute_name)))
+        edit.editingFinished.connect(
+            lambda selected_edit=edit,
+            selected_setter=setter,
+            selected_attribute=attribute_name,
+            selected_formatter=formatter: self.update_processing_value(
+                selected_edit,
+                selected_setter,
+                selected_attribute,
+                selected_formatter,
             )
         )
+        form.addRow(label, edit)
+        return edit
 
-        self.update_plot(
-            processed
-        )
+    # ------------------------------------------------------------------
+    # Calibration
+    # ------------------------------------------------------------------
+    def open_calibration_dialog(self) -> None:
+        spectrum = self.processor.last_processed_data
+        if spectrum is None:
+            QMessageBox.warning(
+                self,
+                "Wavelength calibration",
+                "Acquire or import a spectrum before calibrating.",
+            )
+            return
 
-        self.lbl_imported_position.setText(
-            f"Spectrum {index + 1} / {total}"
-        )
-
-        if self.slider_imported.value() != index:
-            self.slider_imported.blockSignals(True)
-            self.slider_imported.setValue(index)
-            self.slider_imported.blockSignals(False)
-
-    def open_calibration_dialog(self):
-        dialog = CalibrationDialog(
+        dialog = NeonCalibrationDialog(
+            spectrum=np.asarray(spectrum, dtype=float),
             coefficients=self.wavelength_coefficients,
             parent=self,
         )
@@ -818,62 +796,121 @@ class RamanGUI(QMainWindow):
         if dialog.coefficients is None:
             self.clear_wavelength_calibration()
         else:
-            self.set_wavelength_calibration(
-                dialog.coefficients
+            self.set_wavelength_calibration(dialog.coefficients)
+
+    def set_wavelength_calibration(self, coefficients, save: bool = True) -> None:
+        coefficients = np.asarray(coefficients, dtype=float)
+        if coefficients.shape != (3,):
+            raise ValueError("Calibration must contain [a2, a1, a0].")
+
+        self.wavelength_coefficients = coefficients
+        self.update_calibration_status()
+        self.update_x_axis()
+        self._redraw_last_spectrum()
+
+        if save:
+            self.save_wavelength_calibration()
+
+    def clear_wavelength_calibration(self, save: bool = True) -> None:
+        self.wavelength_coefficients = None
+        self.update_calibration_status()
+        self.update_x_axis()
+        self._redraw_last_spectrum()
+
+        if save:
+            self.save_wavelength_calibration()
+
+    def _redraw_last_spectrum(self) -> None:
+        if self.processor.last_processed_data is not None:
+            self.update_plot(self.processor.last_processed_data, count_frame=False)
+
+    def update_calibration_status(self) -> None:
+        if self.wavelength_coefficients is None:
+            self.lbl_calibration_status.setText("Scale: pixels")
+            self.lbl_calibration_status.setToolTip("")
+            return
+
+        a2, a1, a0 = self.wavelength_coefficients
+        kind = "linear" if np.isclose(a2, 0.0) else "quadratic"
+        self.lbl_calibration_status.setText(f"Scale: wavelength ({kind})")
+        self.lbl_calibration_status.setToolTip(
+            f"a₂ = {a2:.8g}\na₁ = {a1:.8g}\na₀ = {a0:.8g}"
+        )
+
+    def get_x_axis(self, data_length: int) -> np.ndarray:
+        pixels = np.arange(data_length, dtype=float)
+        if self.wavelength_coefficients is None:
+            return pixels
+        return np.polyval(self.wavelength_coefficients, pixels)
+
+    def update_x_axis(self) -> None:
+        if self.wavelength_coefficients is None:
+            self.plot_widget.setLabel("bottom", "Pixel")
+            self.plot_widget.setXRange(0, USEFUL_CCD_PIXELS - 1)
+            return
+
+        wavelength_axis = self.get_x_axis(USEFUL_CCD_PIXELS)
+        self.plot_widget.setLabel("bottom", "Wavelength", units="nm")
+        self.plot_widget.setXRange(
+            float(np.min(wavelength_axis)),
+            float(np.max(wavelength_axis)),
+        )
+
+    def save_wavelength_calibration(self) -> None:
+        payload = {
+            "enabled": self.wavelength_coefficients is not None,
+            "coefficients": (
+                None
+                if self.wavelength_coefficients is None
+                else self.wavelength_coefficients.tolist()
+            ),
+        }
+
+        try:
+            self.calibration_path.write_text(
+                json.dumps(payload, indent=4),
+                encoding="utf-8",
             )
+        except OSError as exc:
+            QMessageBox.warning(self, "Calibration error", str(exc))
 
-    def return_to_live_data(self):
-        self.data_source = "live"
+    def load_wavelength_calibration(self) -> None:
+        if not self.calibration_path.exists():
+            self.clear_wavelength_calibration(save=False)
+            return
 
-        self.imported_raw_spectra = None
-        self.imported_spectrum_index = 0
+        try:
+            payload = json.loads(self.calibration_path.read_text(encoding="utf-8"))
+            coefficients = payload.get("coefficients")
 
-        self.btn_return_live.setEnabled(False)
+            if not payload.get("enabled", False) or coefficients is None:
+                self.clear_wavelength_calibration(save=False)
+                return
 
-        self.slider_imported.setEnabled(False)
+            self.set_wavelength_calibration(
+                np.asarray(coefficients, dtype=float),
+                save=False,
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Calibration error",
+                f"Stored calibration is invalid. Pixel scale will be used.\n\n{exc}",
+            )
+            self.clear_wavelength_calibration(save=False)
 
-        self.slider_imported.blockSignals(True)
-
-        self.slider_imported.setMinimum(0)
-        self.slider_imported.setMaximum(0)
-        self.slider_imported.setValue(0)
-
-        self.slider_imported.blockSignals(False)
-
-        self.lbl_imported_position.setText(
-            "No imported data"
-        )
-
-        self.lbl_recording_status.setText(
-            "Live data"
-        )
-
-        self.processor.spectra_buffer.clear()
-
-    def set_laser_state(self, enabled: bool) -> None:
-        if enabled:
-            self.laser.on()
-            self.btn_laser.setText("Laser ON")
-        else:
-            self.laser.off()
-            self.btn_laser.setText("Laser OFF")
-
+    # ------------------------------------------------------------------
+    # Processing controls
+    # ------------------------------------------------------------------
     def update_processing_value(
         self,
-        widget,
-        setter,
-        attribute_name,
-        formatter=str,
-    ):
-        """
-        Applies a processing parameter entered by the user.
-
-        The setter performs validation and range limiting. After applying the
-        value, the field is rewritten with the actual accepted value.
-        """
+        widget: QLineEdit,
+        setter: Callable,
+        attribute_name: str,
+        formatter: Callable = str,
+    ) -> None:
         try:
             setter(widget.text())
-
         except (ValueError, TypeError):
             QMessageBox.warning(
                 self,
@@ -881,747 +918,166 @@ class RamanGUI(QMainWindow):
                 f"The entered value for {attribute_name} is invalid.",
             )
 
-        actual_value = getattr(
-            self.processor,
-            attribute_name,
-        )
+        widget.setText(formatter(getattr(self.processor, attribute_name)))
+        self._processing_configuration_changed()
 
-        widget.setText(
-            formatter(actual_value)
-        )
-
-        # Avoid combining spectra processed with different configurations.
-        self.processor.spectra_buffer.clear()
-
-        self.processor.save_config()
-
-        if (self.data_source == "imported" and self.imported_raw_spectra is not None):
-            self.show_imported_spectrum(self.imported_spectrum_index)
-
-
-    def update_processing_toggle(self, setter, checked):
+    def update_processing_toggle(self, setter: Callable, checked: bool) -> None:
         setter(checked)
+        self._processing_configuration_changed()
 
-        # Avoid mixing spectra acquired using different configurations.
+    def _processing_configuration_changed(self) -> None:
         self.processor.spectra_buffer.clear()
-
         self.processor.save_config()
 
-        if (self.data_source == "imported" and self.imported_raw_spectra is not None):
+        if self.data_source == "imported" and self.imported_raw_spectra is not None:
             self.show_imported_spectrum(self.imported_spectrum_index)
 
-
-    def restore_processing_defaults(self):
+    def restore_processing_defaults(self) -> None:
         response = QMessageBox.question(
             self,
             "Restore defaults",
             "Restore all processing parameters to their default values?",
             QMessageBox.Yes | QMessageBox.No,
         )
-
         if response != QMessageBox.Yes:
             return
 
         self.processor.delete_config()
-
         self.refresh_processing_controls()
-
         self.processor.spectra_buffer.clear()
 
+    def refresh_processing_controls(self) -> None:
+        field_map = {
+            self.edit_dark_n_samples: ("dark_n_samples", str),
+            self.edit_spike_window: ("spike_window", str),
+            self.edit_spike_multiplier: ("spike_T_multiplier", str),
+            self.edit_n_spectra: ("n_spectra", str),
+            self.edit_filter_window: ("filter_window", str),
+            self.edit_filter_poly_order: ("filter_poly_order", str),
+            self.edit_baseline_lambda: ("baseline_lambda", lambda value: f"{value:.2e}"),
+            self.edit_baseline_diff_order: ("baseline_diff_order", str),
+            self.edit_baseline_iterations: ("baseline_iterations", str),
+            self.edit_baseline_tolerance: (
+                "baseline_tolerance",
+                lambda value: f"{value:.2e}",
+            ),
+            self.edit_peak_prominence: ("peak_prominence_factor", str),
+            self.edit_peak_min_distance: ("peak_min_distance", str),
+            self.edit_peak_min_width: ("peak_min_width", str),
+        }
 
-    def refresh_processing_controls(self):
-        self.edit_dark_n_samples.setText(
-            str(self.processor.dark_n_samples)
-        )
+        for widget, (attribute, formatter) in field_map.items():
+            widget.setText(formatter(getattr(self.processor, attribute)))
 
-        self.edit_spike_window.setText(
-            str(self.processor.spike_window)
-        )
+        toggle_map = {
+            self.checkbox_dark_subtraction: "enable_dark_subtraction",
+            self.checkbox_spike_correction: "enable_spike_correction",
+            self.checkbox_filtering: "enable_filtering",
+            self.checkbox_baseline_correction: "enable_baseline_correction",
+            self.checkbox_normalization: "enable_normalization",
+        }
 
-        self.edit_spike_multiplier.setText(
-            str(self.processor.spike_T_multiplier)
-        )
+        for checkbox, attribute in toggle_map.items():
+            checkbox.blockSignals(True)
+            checkbox.setChecked(bool(getattr(self.processor, attribute)))
+            checkbox.blockSignals(False)
 
-        self.edit_n_spectra.setText(
-            str(self.processor.n_spectra)
-        )
-
-        self.edit_filter_window.setText(
-            str(self.processor.filter_window)
-        )
-
-        self.edit_filter_poly_order.setText(
-            str(self.processor.filter_poly_order)
-        )
-
-        self.edit_baseline_lambda.setText(
-            f"{self.processor.baseline_lambda:.2e}"
-        )
-
-        self.edit_baseline_diff_order.setText(
-            str(self.processor.baseline_diff_order)
-        )
-
-        self.edit_baseline_iterations.setText(
-            str(self.processor.baseline_iterations)
-        )
-
-        self.edit_baseline_tolerance.setText(
-            f"{self.processor.baseline_tolerance:.2e}"
-        )
-
-        self.checkbox_dark_subtraction.setChecked(
-            self.processor.enable_dark_subtraction
-        )
-
-        self.checkbox_spike_correction.setChecked(
-            self.processor.enable_spike_correction
-        )
-
-        self.checkbox_filtering.setChecked(
-            self.processor.enable_filtering
-        )
-
-        self.checkbox_baseline_correction.setChecked(
-            self.processor.enable_baseline_correction
-        )
-
-        self.checkbox_normalization.setChecked(
-            self.processor.enable_normalization
-        )
-
-        self.edit_peak_prominence.setText(
-            str(self.processor.peak_prominence_factor)
-        )
-
-        self.edit_peak_min_distance.setText(
-            str(self.processor.peak_min_distance)
-        )
-
-        self.edit_peak_min_width.setText(
-            str(self.processor.peak_min_width)
-        )
-
-    def delete_configuration(self):
-        self.processor.delete_config()
-        self.update_processing_config_labels()
-        QMessageBox.information(self, "Configuration Deleted", "The configuration file has been deleted and defaults have been restored.")
-
-    def update_processing_config_labels(self):
-        self.lbl_dark_n_samples.setText(
-            f"Dark samples: {self.processor.dark_n_samples}"
-        )
-        self.lbl_spike_window.setText(
-            f"Spike window: {self.processor.spike_window}"
-        )
-        self.lbl_spike_T_multiplier.setText(
-            f"Spike T multiplier: {self.processor.spike_T_multiplier}"
-        )
-        self.lbl_n_spectra.setText(
-            f"Number of spectra: {self.processor.n_spectra}"
-        )
-
-        self.lbl_filter_window.setText(
-            f"Filter window: {self.processor.filter_window}"
-        )
-        self.lbl_filter_poly_order.setText(
-            f"Filter polynomial order: {self.processor.filter_poly_order}"
-        )
-
-        self.lbl_baseline_lambda.setText(
-            f"Baseline lambda: {self.processor.baseline_lambda:.2e}"
-        )
-        self.lbl_baseline_diff_order.setText(
-            f"Baseline diff order: {self.processor.baseline_diff_order}"
-        )
-        self.lbl_baseline_iterations.setText(
-            f"Baseline iterations: {self.processor.baseline_iterations}"
-        )
-        self.lbl_baseline_tolerance.setText(
-            f"Baseline tolerance: {self.processor.baseline_tolerance:.2e}"
-        )
-
-        self.lbl_enable_dark_subtraction.setText(
-            f"Dark subtraction: {self._enabled_text(self.processor.enable_dark_subtraction)}"
-        )
-        self.lbl_enable_spike_correction.setText(
-            f"Spike correction: {self._enabled_text(self.processor.enable_spike_correction)}"
-        )
-        self.lbl_enable_filtering.setText(
-            f"Filtering: {self._enabled_text(self.processor.enable_filtering)}"
-        )
-        self.lbl_enable_baseline_correction.setText(
-            f"Baseline correction: {self._enabled_text(self.processor.enable_baseline_correction)}"
-        )
-        self.lbl_enable_normalization.setText(
-            f"Normalization: {self._enabled_text(self.processor.enable_normalization)}"
-        )
-
-    def set_wavelength_calibration(self, coefficients, save=True,):
-        coefficients = np.asarray(
-            coefficients,
-            dtype=float,
-        )
-
-        if coefficients.shape != (3,):
-            raise ValueError(
-                "Calibration must contain exactly "
-                "three coefficients."
-            )
-
-        self.wavelength_coefficients = coefficients
-
-        self.update_calibration_status()
-        self.update_x_axis()
-
-        if self.processor.last_processed_data is not None:
-            self.update_plot(
-                self.processor.last_processed_data
-            )
-
-        if save:
-            self.save_wavelength_calibration()
-
-    
-    def clear_wavelength_calibration(self, save=True,):
-        self.wavelength_coefficients = None
-
-        self.update_calibration_status()
-        self.update_x_axis()
-
-        if self.processor.last_processed_data is not None:
-            self.update_plot(
-                self.processor.last_processed_data
-            )
-
-        if save:
-            self.save_wavelength_calibration()
-
-    def update_calibration_status(self):
-        if self.wavelength_coefficients is None:
-            self.lbl_calibration_status.setText(
-                "Scale: pixels"
-            )
-            return
-
-        a2, a1, a0 = self.wavelength_coefficients
-
-        if a2 == 0.0:
-            calibration_type = "linear"
-        else:
-            calibration_type = "quadratic"
-
-        self.lbl_calibration_status.setText(
-            f"Scale: wavelength ({calibration_type})"
-        )
-
-        self.lbl_calibration_status.setToolTip(
-            (
-                f"a₂ = {a2:.8g}\n"
-                f"a₁ = {a1:.8g}\n"
-                f"a₀ = {a0:.8g}"
-            )
-        )
-
-    def save_wavelength_calibration(self):
-        if self.wavelength_coefficients is None:
-            calibration = {
-                "enabled": False,
-                "coefficients": None,
-            }
-
-        else:
-            calibration = {
-                "enabled": True,
-                "coefficients": (
-                    self.wavelength_coefficients.tolist()
-                ),
-            }
-
+    # ------------------------------------------------------------------
+    # Device and acquisition
+    # ------------------------------------------------------------------
+    def _create_laser_output(self):
+        if OutputDevice is None:
+            return None
         try:
-            with open(
-                self.calibration_path,
-                "w",
-                encoding="utf-8",
-            ) as file:
-                json.dump(
-                    calibration,
-                    file,
-                    indent=4,
-                )
+            return OutputDevice(17, active_high=False, initial_value=False)
+        except Exception:
+            return None
 
-            print(
-                "Calibration saved to "
-                f"{self.calibration_path}"
-            )
-
-        except OSError as exc:
-            QMessageBox.warning(
-                self,
-                "Calibration error",
-                (
-                    "The calibration could not be saved.\n\n"
-                    f"{exc}"
-                ),
-            )
-
-    def get_x_axis(self, data_length):
-        pixel_axis = np.arange(data_length, dtype=float)
-
-        if self.wavelength_coefficients is None:
-            return pixel_axis
-
-        return np.polyval(
-            self.wavelength_coefficients,
-            pixel_axis,
-        )
-
-
-    def update_x_axis(self):
-        if self.wavelength_coefficients is None:
-            self.plot_widget.setLabel(
-                "bottom",
-                "Pixel",
-                units="",
-            )
-            self.plot_widget.setXRange(
-                0,
-                USEFUL_CCD_PIXELS - 1,
-            )
-            return
-
-        wavelength_axis = self.get_x_axis(
-            USEFUL_CCD_PIXELS
-        )
-
-        self.plot_widget.setLabel(
-            "bottom",
-            "Wavelength",
-            units="nm",
-        )
-
-        self.plot_widget.setXRange(
-            float(np.min(wavelength_axis)),
-            float(np.max(wavelength_axis)),
-        )
-
-    def load_wavelength_calibration(self):
-        if not self.calibration_path.exists():
-            self.clear_wavelength_calibration(
-                save=False
-            )
-            return
-
-        try:
-            with open(
-                self.calibration_path,
-                "r",
-                encoding="utf-8",
-            ) as file:
-                calibration = json.load(file)
-
-        except (
-            OSError,
-            json.JSONDecodeError,
-        ) as exc:
-            QMessageBox.warning(
-                self,
-                "Calibration error",
-                (
-                    "The calibration file could not be loaded. "
-                    "Pixel scale will be used.\n\n"
-                    f"{exc}"
-                ),
-            )
-
-            self.clear_wavelength_calibration(
-                save=False
-            )
-            return
-
-        enabled = calibration.get(
-            "enabled",
-            False,
-        )
-
-        coefficients = calibration.get(
-            "coefficients"
-        )
-
-        if not enabled or coefficients is None:
-            self.clear_wavelength_calibration(
-                save=False
-            )
-            return
-
-        try:
-            coefficients = np.asarray(
-                coefficients,
-                dtype=float,
-            )
-
-            if coefficients.shape != (3,):
-                raise ValueError(
-                    "Invalid coefficient count."
-                )
-
-        except (TypeError, ValueError) as exc:
-            QMessageBox.warning(
-                self,
-                "Calibration error",
-                (
-                    "The stored calibration is invalid. "
-                    "Pixel scale will be used.\n\n"
-                    f"{exc}"
-                ),
-            )
-
-            self.clear_wavelength_calibration(
-                save=False
-            )
-            return
-
-        self.set_wavelength_calibration(
-            coefficients,
-            save=False,
-        )
-
-    @staticmethod
-    def _enabled_text(enabled):
-        return "Enabled" if enabled else "Disabled"
-    ############################################################################
-    def open_processing_config(self):
-        if self.worker and self.worker.capturing_dark:
-            QMessageBox.warning(
-                self,
-                "Dark acquisition",
-                "Wait until the dark acquisition is complete.",
-            )
-            return
-        
-        dialog = ProcessingConfigDialog(self.processor, self)
-
-        if dialog.exec() == QDialog.Accepted:
-            self.update_processing_config_labels()
-            self.processor.spectra_buffer.clear()  # Clear the buffer to avoid using old data
-            self.processor.save_config()
-
-    ###########################################################################
-    # DEVICE CONNECTION
-    ###########################################################################
-    def connect_device(self):
+    def connect_device(self) -> None:
         port = self.port_input.currentData()
         if port is None:
             QMessageBox.warning(self, "Connection error", "No serial port selected.")
             return
-        
-        try:
-            if port == "__MOCK__":
-                self.dev = SpectrometerDriverMock()
-            else:
-                self.dev = SpectrometerDriver(port=port, timeout=10.0)
-            self.btn_connect.setText("Connected")
-            self.btn_connect.setStyleSheet("background-color: #ccffcc;")
-            self.btn_connect.setEnabled(False)
-            self.port_input.setEnabled(False)
-            self.btn_start.setEnabled(True)
-            self.btn_start.setEnabled(True)
-            self.btn_dark.setEnabled(True)
-            self.btn_record.setEnabled(True)
-            
-            # Inicializar el hilo (pero no arrancarlo aún)
-            self.worker = AcquisitionThread(
-                driver=self.dev,
-                processor=self.processor,
-            )
 
+        try:
+            self.dev = (
+                SpectrometerDriverMock()
+                if port == "__MOCK__"
+                else SpectrometerDriver(port=port, timeout=10.0)
+            )
+            self.worker = AcquisitionThread(driver=self.dev, processor=self.processor)
             self.worker.data_ready.connect(self.update_plot)
             self.worker.raw_data_ready.connect(self.receive_raw_data)
             self.worker.dark_progress.connect(self.update_dark_progress)
             self.worker.dark_finished.connect(self.dark_capture_finished)
             self.worker.acquisition_error.connect(self.show_acquisition_error)
-                
-            self.frame_counter = 0
 
-            self.packet_timer = QElapsedTimer()
+            self.btn_connect.setText("Connected")
+            self.btn_connect.setStyleSheet("background-color: #ccffcc;")
+            self.btn_connect.setEnabled(False)
+            self.port_input.setEnabled(False)
+            self.btn_start.setEnabled(True)
+            self.btn_dark.setEnabled(True)
+            self.btn_record.setEnabled(True)
+
             self.packet_timer.start()
-
-            self.acquisition_ui_timer = QTimer(self)
-            self.acquisition_ui_timer.setInterval(100)
-            self.acquisition_ui_timer.timeout.connect(self.update_acquisition_status)
             self.acquisition_ui_timer.start()
-
-        except Exception as e:
-            QMessageBox.critical(self, "Connection Error", f"Could not connect to {port}.\n\n{str(e)}")
-
-    @Slot(np.ndarray)
-    def receive_raw_data(self, raw_data):
-        if not self.is_recording:
-            return
-
-        self.recorded_raw_spectra.append(
-            np.asarray(
-                raw_data,
-                dtype=np.uint16,
-            ).copy()
-        )
-
-        self.lbl_recording_status.setText(
-            (
-                "Recording: "
-                f"{len(self.recorded_raw_spectra)} spectra"
-            )
-    )
-        
-    def toggle_recording(self):
-        if not self.is_recording:
-            self.start_recording()
-        else:
-            self.stop_recording_and_save()
-
-    def start_recording(self):
-        if self.worker is None or not self.worker.isRunning():
-            QMessageBox.warning(
-                self,
-                "Recording",
-                "Start the acquisition before recording data.",
-            )
-            return
-
-        if self.worker.capturing_dark:
-            QMessageBox.warning(
-                self,
-                "Recording",
-                (
-                    "Wait until the dark acquisition "
-                    "is complete."
-                ),
-            )
-            return
-
-        self.recorded_raw_spectra.clear()
-        self.is_recording = True
-
-        self.btn_record.setText(
-            "Stop and save"
-        )
-        self.btn_record.setStyleSheet(
-            "background-color: #ffcccc;"
-        )
-
-        self.lbl_recording_status.setText(
-            "Recording: 0 spectra"
-        )
-
-
-    def stop_recording_and_save(self):
-        self.is_recording = False
-
-        self.btn_record.setText(
-            "Start recording"
-        )
-        self.btn_record.setStyleSheet("")
-
-        number_of_spectra = len(
-            self.recorded_raw_spectra
-        )
-
-        if number_of_spectra == 0:
-            self.lbl_recording_status.setText(
-                "No spectra recorded"
-            )
-
-            QMessageBox.warning(
-                self,
-                "Recording",
-                "No spectra were recorded.",
-            )
-            return
-
-        default_name = (
-            "raman_raw_"
-            + datetime.now().strftime(
-                "%Y%m%d_%H%M%S"
-            )
-            + ".npz"
-        )
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save raw Raman data",
-            str(Path.home() / default_name),
-            "NumPy compressed file (*.npz)",
-        )
-
-        if not filename:
-            self.lbl_recording_status.setText(
-                (
-                    f"Recording discarded: "
-                    f"{number_of_spectra} spectra"
-                )
-            )
-
-            self.recorded_raw_spectra.clear()
-            return
-
-        if not filename.lower().endswith(".npz"):
-            filename += ".npz"
-
-        try:
-            self.save_raw_recording(filename)
-
-        except (OSError, ValueError) as exc:
+        except Exception as exc:
             QMessageBox.critical(
                 self,
-                "Recording error",
-                (
-                    "The recording could not be saved."
-                    f"\n\n{exc}"
-                ),
+                "Connection error",
+                f"Could not connect to {port}.\n\n{exc}",
             )
 
-            self.lbl_recording_status.setText(
-                "Save failed"
-            )
-            return
-
-        self.lbl_recording_status.setText(
-            f"Saved: {number_of_spectra} spectra"
-        )
-
-        self.recorded_raw_spectra.clear()
-
-
-    def save_raw_recording(self, filename):
-        raw_spectra = np.asarray(
-            self.recorded_raw_spectra,
-            dtype=np.uint16,
-        )
-
-        if raw_spectra.ndim != 2:
-            raise ValueError(
-                "Recorded spectra have an invalid shape."
-            )
-
-        processing_config = {
-            "dark_n_samples": self.processor.dark_n_samples,
-            "spike_window": self.processor.spike_window,
-            "spike_T_multiplier": (
-                self.processor.spike_T_multiplier
-            ),
-            "n_spectra": self.processor.n_spectra,
-            "filter_window": self.processor.filter_window,
-            "filter_poly_order": (
-                self.processor.filter_poly_order
-            ),
-            "baseline_lambda": (
-                self.processor.baseline_lambda
-            ),
-            "baseline_diff_order": (
-                self.processor.baseline_diff_order
-            ),
-            "baseline_iterations": (
-                self.processor.baseline_iterations
-            ),
-            "baseline_tolerance": (
-                self.processor.baseline_tolerance
-            ),
-            "enable_dark_subtraction": (
-                self.processor.enable_dark_subtraction
-            ),
-            "enable_spike_correction": (
-                self.processor.enable_spike_correction
-            ),
-            "enable_filtering": (
-                self.processor.enable_filtering
-            ),
-            "enable_baseline_correction": (
-                self.processor.enable_baseline_correction
-            ),
-            "enable_normalization": (
-                self.processor.enable_normalization
-            ),
-        }
-
-        if self.processor.dark_average is None:
-            dark_spectrum = np.array(
-                [],
-                dtype=float,
-            )
-        else:
-            dark_spectrum = np.asarray(
-                self.processor.dark_average,
-                dtype=float,
-            )
-
-        if self.wavelength_coefficients is None:
-            calibration = np.array(
-                [],
-                dtype=float,
-            )
-        else:
-            calibration = np.asarray(
-                self.wavelength_coefficients,
-                dtype=float,
-            )
-
-        integration_time_us = getattr(
-            self.dev,
-            "int_time_us",
-            -1,
-        )
-
-        skip_counter = getattr(
-            self.dev,
-            "skip_count",
-            -1,
-        )
-
-        np.savez_compressed(
-            filename,
-            raw_spectra=raw_spectra,
-            dark_spectrum=dark_spectrum,
-            wavelength_coefficients=calibration,
-            integration_time_us=np.asarray(
-                integration_time_us
-            ),
-            skip_counter=np.asarray(
-                skip_counter
-            ),
-            processing_config=np.asarray(
-                json.dumps(processing_config)
-            ),
-            acquisition_datetime=np.asarray(
-                datetime.now().isoformat(
-                    timespec="seconds"
-                )
-            ),
-        )
-    ############################################################################
-    # COMMANDS
-    ############################################################################
-    def send_cmd(self, cmd_type):
-        if not self.dev: return
-        
-        if cmd_type == 'reset':
-            self.dev.reset_device()
-        elif cmd_type == 'time':
-            val = self.spin_time.value()*1000
-            self.dev.set_integration_time(val)
-        elif cmd_type == 'accum':
-            val = self.spin_accum.value()
-            self.dev.set_accumulations(val)
-        elif cmd_type == 'skip':
-            val = self.spin_skip.value()
-            self.dev.set_skip_counter(val)
-        elif cmd_type == 'toggle_led':
-            self.dev.toggle_led()
-
-    def start_dark_capture(self):
+    def toggle_acquisition(self) -> None:
         if self.worker is None:
             return
 
         if not self.worker.isRunning():
+            self.processor.spectra_buffer.clear()
+            self.worker.start()
+            self.btn_start.setText("Stop reading")
+            self.btn_start.setStyleSheet("background-color: #ffcccc;")
+            return
+
+        if self.is_recording:
+            self.stop_recording_and_save()
+        self.worker.stop()
+        self.processor.spectra_buffer.clear()
+        self.btn_start.setText("Start reading")
+        self.btn_start.setStyleSheet("background-color: #ccffcc;")
+
+    def update_acquisition_status(self) -> None:
+        if not self.packet_timer.isValid():
+            return
+        elapsed_s = self.packet_timer.elapsed() / 1000.0
+        self.frame_time_label.setText(f"Since last frame: {elapsed_s:.2f} s")
+
+    def reset_frame_counter(self) -> None:
+        self.frame_counter = 0
+        self.frame_label.setText("Frame: 0")
+
+    def send_cmd(self, command: str) -> None:
+        if self.dev is None:
+            return
+
+        commands = {
+            "reset": self.dev.reset_device,
+            "time": lambda: self.dev.set_integration_time(self.spin_time.value() * 1000.0),
+            "skip": lambda: self.dev.set_skip_counter(self.spin_skip.value()),
+            "toggle_led": self.dev.toggle_led,
+        }
+        action = commands.get(command)
+        if action is not None:
+            action()
+
+    def set_laser_state(self, enabled: bool) -> None:
+        if self.laser is not None:
+            self.laser.on() if enabled else self.laser.off()
+        self.btn_laser.setText("Laser ON" if enabled else "Laser OFF")
+
+    def start_dark_capture(self) -> None:
+        if self.worker is None or not self.worker.isRunning():
             QMessageBox.warning(
                 self,
                 "Dark acquisition",
@@ -1633,424 +1089,320 @@ class RamanGUI(QMainWindow):
             return
 
         self.processor.spectra_buffer.clear()
-
         self.worker.start_dark_capture()
-
         self.btn_dark.setEnabled(False)
         self.btn_start.setEnabled(False)
+        self.lbl_dark_status.setText(f"Dark: 0 / {self.processor.dark_n_samples}")
 
-        self.lbl_dark_status.setText(
-            f"Dark: 0 / {self.processor.dark_n_samples}"
-        )
+    def update_dark_progress(self, current: int, total: int) -> None:
+        self.lbl_dark_status.setText(f"Dark: {current} / {total}")
 
-    def update_dark_progress(self, current, total):
-        self.lbl_dark_status.setText(
-            f"Dark: {current} / {total}"
-        )
-
-    def dark_capture_finished(self):
+    def dark_capture_finished(self) -> None:
         self.btn_dark.setEnabled(True)
         self.btn_start.setEnabled(True)
 
         if self.processor.dark_average is None:
             self.lbl_dark_status.setText("Dark acquisition failed")
-
-            QMessageBox.warning(
-                self,
-                "Dark acquisition",
-                "The dark spectrum could not be calculated.",
-            )
+            QMessageBox.warning(self, "Dark acquisition", "Dark spectrum could not be calculated.")
             return
 
         self.lbl_dark_status.setText(
             f"Dark acquired: {self.processor.dark_n_samples} samples averaged"
         )
 
-        QMessageBox.information(
-            self,
-            "Dark acquisition",
-            (
-                "Dark spectrum acquired successfully.\n\n"
-                f"Samples averaged: {self.processor.dark_n_samples}"
-            ),
-        )
-    
-    ############################################################################
-    # UPDATERS
-    ############################################################################
-    # ADQUISITION BUTTON
-    def show_acquisition_error(self, message):
-        print(f"Acquisition error: {message}")
+    def show_acquisition_error(self, message: str) -> None:
+        self.btn_start.setText("Start reading")
+        self.btn_start.setStyleSheet("background-color: #ccffcc;")
+        QMessageBox.critical(self, "Acquisition error", message)
 
-    def toggle_acquisition(self):
-        if self.worker is None:
+    # ------------------------------------------------------------------
+    # Recording and imported data
+    # ------------------------------------------------------------------
+    @Slot(np.ndarray)
+    def receive_raw_data(self, raw_data: np.ndarray) -> None:
+        if not self.is_recording:
+            return
+        self.recorded_raw_spectra.append(np.asarray(raw_data, dtype=np.uint16).copy())
+        self.lbl_recording_status.setText(
+            f"Recording: {len(self.recorded_raw_spectra)} spectra"
+        )
+
+    def toggle_recording(self) -> None:
+        self.start_recording() if not self.is_recording else self.stop_recording_and_save()
+
+    def start_recording(self) -> None:
+        if self.worker is None or not self.worker.isRunning():
+            QMessageBox.warning(self, "Recording", "Start acquisition before recording.")
+            return
+        if self.worker.capturing_dark:
+            QMessageBox.warning(self, "Recording", "Wait for dark acquisition to finish.")
             return
 
-        if not self.worker.isRunning():
-            self.processor.spectra_buffer.clear()
+        self.recorded_raw_spectra.clear()
+        self.is_recording = True
+        self.btn_record.setText("Stop and save")
+        self.btn_record.setStyleSheet("background-color: #ffcccc;")
+        self.lbl_recording_status.setText("Recording: 0 spectra")
 
-            self.worker.start()
+    def stop_recording_and_save(self) -> None:
+        self.is_recording = False
+        self.btn_record.setText("Start recording")
+        self.btn_record.setStyleSheet("")
 
-            self.btn_start.setText("Stop Reading")
-            self.btn_start.setStyleSheet("background-color: #ffcccc;")
+        count = len(self.recorded_raw_spectra)
+        if count == 0:
+            self.lbl_recording_status.setText("No spectra recorded")
+            return
 
-        else:
-            if self.is_recording:
-                self.stop_recording_and_save()
-            self.worker.stop()
+        default_name = "raman_raw_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".npz"
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save raw Raman data",
+            str(Path.home() / default_name),
+            "NumPy compressed file (*.npz)",
+        )
+        if not filename:
+            self.recorded_raw_spectra.clear()
+            self.lbl_recording_status.setText("Recording discarded")
+            return
 
-            self.processor.spectra_buffer.clear()
+        if not filename.lower().endswith(".npz"):
+            filename += ".npz"
 
-            self.btn_start.setText("Start Reading")
-            self.btn_start.setStyleSheet("background-color: #ccffcc;")
+        try:
+            self.save_raw_recording(filename)
+            self.lbl_recording_status.setText(f"Saved: {count} spectra")
+            self.recorded_raw_spectra.clear()
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Recording error", str(exc))
 
-    def import_raw_data(self):
+    def save_raw_recording(self, filename: str) -> None:
+        raw_spectra = np.asarray(self.recorded_raw_spectra, dtype=np.uint16)
+        if raw_spectra.ndim != 2:
+            raise ValueError("Recorded spectra have an invalid shape.")
+
+        processing_config = {
+            name: getattr(self.processor, name)
+            for name in (
+                "dark_n_samples",
+                "spike_window",
+                "spike_T_multiplier",
+                "n_spectra",
+                "filter_window",
+                "filter_poly_order",
+                "baseline_lambda",
+                "baseline_diff_order",
+                "baseline_iterations",
+                "baseline_tolerance",
+                "enable_dark_subtraction",
+                "enable_spike_correction",
+                "enable_filtering",
+                "enable_baseline_correction",
+                "enable_normalization",
+            )
+        }
+
+        dark = (
+            np.array([], dtype=float)
+            if self.processor.dark_average is None
+            else np.asarray(self.processor.dark_average, dtype=float)
+        )
+        calibration = (
+            np.array([], dtype=float)
+            if self.wavelength_coefficients is None
+            else self.wavelength_coefficients
+        )
+
+        np.savez_compressed(
+            filename,
+            raw_spectra=raw_spectra,
+            dark_spectrum=dark,
+            wavelength_coefficients=calibration,
+            integration_time_us=np.asarray(getattr(self.dev, "int_time_us", -1)),
+            skip_counter=np.asarray(getattr(self.dev, "skip_count", -1)),
+            processing_config=np.asarray(json.dumps(processing_config)),
+            acquisition_datetime=np.asarray(datetime.now().isoformat(timespec="seconds")),
+        )
+
+    def import_raw_data(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "Import raw Raman data",
             str(Path.home()),
             "NumPy compressed file (*.npz)",
         )
-
         if not filename:
             return
 
         try:
-            with np.load(
-                filename,
-                allow_pickle=False,
-            ) as data:
+            with np.load(filename, allow_pickle=False) as data:
                 if "raw_spectra" not in data:
-                    raise ValueError(
-                        "The selected file does not contain raw_spectra."
-                    )
+                    raise ValueError("The file does not contain raw_spectra.")
 
-                raw_spectra = np.asarray(
-                    data["raw_spectra"],
-                    dtype=np.uint16,
-                )
+                raw = np.asarray(data["raw_spectra"], dtype=np.uint16)
+                if raw.ndim == 1:
+                    raw = raw[np.newaxis, :]
+                if raw.ndim != 2:
+                    raise ValueError("raw_spectra must have shape (spectra, pixels).")
 
-                if raw_spectra.ndim == 1:
-                    raw_spectra = raw_spectra[np.newaxis, :]
+                self.imported_raw_spectra = raw.copy()
 
-                if raw_spectra.ndim != 2:
-                    raise ValueError(
-                        "Raw spectra must have shape (spectra, pixels)."
-                    )
+                dark = np.asarray(data.get("dark_spectrum", []), dtype=float)
+                if dark.size == raw.shape[1]:
+                    self.processor.dark_average = dark.copy()
 
-                self.imported_raw_spectra = raw_spectra.copy()
-
-                if "dark_spectrum" in data:
-                    dark = np.asarray(
-                        data["dark_spectrum"],
-                        dtype=float,
-                    )
-
-                    if dark.size == raw_spectra.shape[1]:
-                        self.processor.dark_average = dark.copy()
-
-                if "wavelength_coefficients" in data:
-                    coefficients = np.asarray(
-                        data["wavelength_coefficients"],
-                        dtype=float,
-                    )
-
-                    if coefficients.shape == (3,):
-                        self.set_wavelength_calibration(
-                            coefficients,
-                            save=False,
-                        )
-
-        except (
-            OSError,
-            ValueError,
-            KeyError,
-        ) as exc:
-            QMessageBox.critical(
-                self,
-                "Import error",
-                (
-                    "The raw data file could not be loaded."
-                    f"\n\n{exc}"
-                ),
-            )
+                calibration = np.asarray(data.get("wavelength_coefficients", []), dtype=float)
+                if calibration.shape == (3,):
+                    self.set_wavelength_calibration(calibration, save=False)
+        except (OSError, ValueError, KeyError) as exc:
+            QMessageBox.critical(self, "Import error", str(exc))
             return
 
         self.data_source = "imported"
-
-        self.btn_return_live.setEnabled(True)
-
+        self.imported_spectrum_index = 0
         total = len(self.imported_raw_spectra)
 
-        self.lbl_recording_status.setText(
-            f"Imported: {total} spectra"
-        )
-
-        self.imported_spectrum_index = 0
-
-        self.slider_imported.blockSignals(True)
-
-        self.slider_imported.setMinimum(0)
-        self.slider_imported.setMaximum(
-            max(0, total - 1)
-        )
+        self.btn_return_live.setEnabled(True)
+        self.slider_imported.setRange(0, max(0, total - 1))
+        self.slider_imported.setEnabled(total > 0)
         self.slider_imported.setValue(0)
+        self.lbl_recording_status.setText(f"Imported: {total} spectra")
 
-        self.slider_imported.blockSignals(False)
-
-        self.slider_imported.setEnabled(
-            total > 0
-        )
-
-        if total > 0:
-            self.lbl_imported_position.setText(
-                f"Spectrum 1 / {total}"
-            )
-
+        if total:
             self.show_imported_spectrum(0)
 
-        else:
-            self.lbl_imported_position.setText(
-                "No imported data"
-            )
-
-
-    def reprocess_imported_data(self):
-        if self.imported_raw_spectra is None:
+    def show_imported_spectrum(self, index: int) -> None:
+        if self.imported_raw_spectra is None or len(self.imported_raw_spectra) == 0:
             return
 
-        if len(self.imported_raw_spectra) == 0:
-            return
+        index = int(np.clip(index, 0, len(self.imported_raw_spectra) - 1))
+        self.imported_spectrum_index = index
 
-        processed_single_spectra = []
+        processed = self.processor.process_single_spectrum(self.imported_raw_spectra[index])
+        processed, _, _, _ = self.processor.process_spectrum_batch([processed])
+        self.update_plot(processed, count_frame=False)
 
-        for raw_spectrum in self.imported_raw_spectra:
-            processed_single = (
-                self.processor.process_single_spectrum(
-                    raw_spectrum
-                )
-            )
-
-            processed_single_spectra.append(
-                processed_single
-            )
-
-        processed_single_spectra = np.asarray(
-            processed_single_spectra,
-            dtype=float,
+        self.lbl_imported_position.setText(
+            f"Spectrum {index + 1} / {len(self.imported_raw_spectra)}"
         )
 
-        processed, _, _, _ = (
-            self.processor.process_spectrum_batch(
-                processed_single_spectra
-            )
-        )
+    def return_to_live_data(self) -> None:
+        self.data_source = "live"
+        self.imported_raw_spectra = None
+        self.imported_spectrum_index = 0
+        self.slider_imported.setRange(0, 0)
+        self.slider_imported.setEnabled(False)
+        self.lbl_imported_position.setText("No imported data")
+        self.btn_return_live.setEnabled(False)
+        self.lbl_recording_status.setText("Live data")
+        self.processor.spectra_buffer.clear()
 
-        self.update_plot(processed)
-
-    @Slot(str)
-    def on_acquisition_error(self, message):
-        self.btn_start.setText("Start Reading")
-        self.btn_start.setStyleSheet("background-color: #ccffcc;")
-        QMessageBox.critical(self, "Acquisition error", message)
-
-    # ENABLE/DISABLE DATA PROCESSING BUTTON
-    def toggle_enable_processing(self):
-        enabled = self.btn_enable_processing.text() == "Enable"
-
-        if enabled:
-            self.btn_enable_processing.setText("Disable")
-        else:
-            self.btn_enable_processing.setText("Enable")
-
-        self.processor.set_enable_processing(enabled)
-
-    # BASELINE
-    def update_baseline(self):
-        val = float(self.edit_baseline_lambda.text())
-        self.processor.set_baseline_lambda(val)
-        self.edit_baseline_lambda.setText(f"{self.processor.baseline_lambda:.1e}")
-
-    # SMOOTHING (WD)
-    def update_smoothing_wd(self):
-        val = int(self.edit_smoothing_wd.text())
-        self.processor.set_smoothing_wd(val)    
-        self.edit_smoothing_wd.setText(str(self.processor.smoothing_wd))
-    
-    # SMOOTHING (POLYORDER)
-    def update_smoothing_poly(self):
-        val = int(self.edit_smoothing_poly.text())
-        self.processor.set_smoothing_poly(val)  
-        self.edit_smoothing_poly.setText(str(self.processor.smoothing_poly))
-
-    # PEAK HEIGHT FACTOR
-    def update_peak_height_factor(self):
-        val = float(self.edit_peak_height_factor.text())
-        self.processor.set_peak_height_factor(val)
-        self.edit_peak_height_factor.setText(f"{self.processor.peak_height_factor:.2f}")
-
-    # PEAK PROMINENCE
-    def update_peak_prominence(self):
-        val = float(self.edit_peak_prominence.text())
-        self.processor.set_peak_prominence(val)
-        self.edit_peak_prominence.setText(f"{self.processor.peak_prominence:.2f}")
-
-
-    # MIN DISTANCE
-    def update_peak_min_distance(self):
-        val = int(self.edit_peak_min_distance.text())
-        self.processor.set_peak_min_distance(val)
-        self.edit_peak_min_distance.setText(str(self.processor.peak_min_distance))
-
-    # TOGGLE PEAK FINDING
-    def toggle_find_peaks(self):
-        self.peaks_enabled = not self.peaks_enabled
-
-        if self.peaks_enabled:
-            self.btn_find_peaks.setText("Hide peaks")
-            self.btn_peak_labels.setEnabled(True)
-            self.find_and_plot_peaks()
-        else:
-            self.btn_find_peaks.setText("Show peaks")
-            self.btn_peak_labels.setEnabled(False)
-
-            self.peaks_curve.setData([], [])
-            self.clear_peak_labels()
-
-    # TOGGLE PEAK LABELS
-    def toggle_peak_labels(self):
-        self.peak_labels_enabled = not self.peak_labels_enabled
-
-        if self.peak_labels_enabled:
-            self.btn_peak_labels.setText("Hide peak labels")
-            if self.peaks_enabled:
-                self.find_and_plot_peaks()
-        else:
-            self.btn_peak_labels.setText("Show peak labels")
-            self.clear_peak_labels()
-
-    def clear_peak_labels(self):
-        for label in self.peak_labels:
-            self.plot_widget.removeItem(label)
-        self.peak_labels.clear()
-
-    # UPDATE PLOT
+    # ------------------------------------------------------------------
+    # Plot and peaks
+    # ------------------------------------------------------------------
     @Slot(np.ndarray)
-    def update_plot(self, processed_data):
+    def update_plot(self, processed_data: np.ndarray, count_frame: bool = True) -> None:
         if processed_data is None:
             return
 
-        sender = self.sender()
-
-        if (
-            sender is self.worker
-            and self.data_source == "imported"
-        ):
+        if self.sender() is self.worker and self.data_source == "imported":
             return
 
-        self.frame_counter += 1
-        self.frame_label.setText(f"Frame: {self.frame_counter}")
-        self.packet_timer.restart()
+        if count_frame:
+            self.frame_counter += 1
+            self.frame_label.setText(f"Frame: {self.frame_counter}")
+            self.packet_timer.restart()
 
-        self.processor.last_processed_data = processed_data
+        data = np.asarray(processed_data, dtype=float)
+        self.processor.last_processed_data = data
+        self.curve.setData(self.get_x_axis(data.size), data)
 
-        x_axis = self.get_x_axis(
-            len(processed_data)
+        self.plot_widget.setYRange(
+            -0.05 if self.processor.enable_normalization else -50,
+            1.05 if self.processor.enable_normalization else 4200,
         )
-
-        self.curve.setData(
-            x_axis,
-            processed_data,
-        )
-
-        if self.processor.enable_normalization:
-            self.plot_widget.setYRange(
-                -0.05,
-                1.05,
-            )
-        else:
-            self.plot_widget.setYRange(
-                -50,
-                4200,
-            )
 
         if self.peaks_enabled:
             self.find_and_plot_peaks()
 
-    # FIND AND PLOT PEAKS
-    def find_and_plot_peaks(self):
-        if self.processor.last_processed_data is None:
+    def toggle_find_peaks(self) -> None:
+        self.peaks_enabled = not self.peaks_enabled
+        self.btn_find_peaks.setText("Hide peaks" if self.peaks_enabled else "Show peaks")
+        self.btn_peak_labels.setEnabled(self.peaks_enabled)
+
+        if self.peaks_enabled:
+            self.find_and_plot_peaks()
+        else:
+            self.peaks_curve.setData([], [])
+            self.clear_peak_labels()
+
+    def toggle_peak_labels(self) -> None:
+        self.peak_labels_enabled = not self.peak_labels_enabled
+        self.btn_peak_labels.setText(
+            "Hide peak labels" if self.peak_labels_enabled else "Show peak labels"
+        )
+        self.find_and_plot_peaks() if self.peak_labels_enabled else self.clear_peak_labels()
+
+    def find_and_plot_peaks(self) -> None:
+        data = self.processor.last_processed_data
+        if data is None:
             return
 
-        data = self.processor.last_processed_data
         peaks = self.processor.detect_peaks(data)
-
         self.clear_peak_labels()
 
         if len(peaks) == 0:
             self.peaks_curve.setData([], [])
             return
 
-        full_x_axis = self.get_x_axis(len(data))
-
-        x_peaks = full_x_axis[peaks]
+        x_axis = self.get_x_axis(len(data))
+        x_peaks = x_axis[peaks]
         y_peaks = data[peaks]
+        self.peaks_curve.setData(x_peaks, y_peaks)
 
-        self.peaks_curve.setData(
-            x_peaks,
-            y_peaks,
-        )
+        if not self.peak_labels_enabled:
+            return
 
-        if self.peak_labels_enabled:
-            for peak_index, x, y in zip(
-                peaks,
-                x_peaks,
-                y_peaks,
-            ):
-                if self.wavelength_coefficients is None:
-                    label_text = f"{peak_index}, {y:.0f}"
-                else:
-                    label_text = f"{x:.3f} nm, {y:.0f}"
+        for pixel, x, y in zip(peaks, x_peaks, y_peaks):
+            text = f"{pixel}, {y:.0f}" if self.wavelength_coefficients is None else f"{x:.3f} nm, {y:.0f}"
+            label = pg.TextItem(
+                text=text,
+                color=(30, 30, 30),
+                fill=pg.mkBrush(255, 255, 255, 255),
+                border=pg.mkPen((120, 120, 120)),
+                anchor=(0.5, 1.2),
+            )
+            label.setPos(x, y)
+            self.plot_widget.addItem(label)
+            self.peak_labels.append(label)
 
-                label = pg.TextItem(
-                    text=label_text,
-                    color=(30, 30, 30),
-                    fill=pg.mkBrush(255, 255, 255, 255),
-                    border=pg.mkPen((120, 120, 120)),
-                    anchor=(0.5, 1.2),
-                )
+    def clear_peak_labels(self) -> None:
+        for label in self.peak_labels:
+            self.plot_widget.removeItem(label)
+        self.peak_labels.clear()
 
-                label.setPos(x, y)
-                self.plot_widget.addItem(label)
-                self.peak_labels.append(label)
-
-    # REFRESH PORTS
-    def refresh_ports(self):
+    # ------------------------------------------------------------------
+    # Miscellaneous
+    # ------------------------------------------------------------------
+    def refresh_ports(self) -> None:
         current = self.port_input.currentData()
         self.port_input.clear()
 
-        ports = list(list_ports.comports())
-
-        for port in ports:
+        for port in list_ports.comports():
             self.port_input.addItem(f"{port.device} ({port.description})", port.device)
-        
-        # The mock must always be available, even with no serial hardware.
         self.port_input.addItem("Mock (synthetic spectrum)", "__MOCK__")
 
-        self.btn_connect.setEnabled(True)
-        for i in range(self.port_input.count()):
-            if self.port_input.itemData(i) == current:
-                self.port_input.setCurrentIndex(i)
+        for index in range(self.port_input.count()):
+            if self.port_input.itemData(index) == current:
+                self.port_input.setCurrentIndex(index)
                 break
 
-    # CLOSE EVENT
-    def closeEvent(self, event):
-        if self.worker and self.worker.running:
+    def closeEvent(self, event) -> None:
+        if self.worker is not None and self.worker.isRunning():
             self.worker.stop()
-        if self.dev:
+        if self.dev is not None:
             self.dev.close()
-        try:
+        if self.laser is not None:
             self.laser.off()
             self.laser.close()
-        finally:
-            event.accept()
+        event.accept()
