@@ -35,7 +35,7 @@ from serial.tools import list_ports
 
 from adquisition import AcquisitionThread
 from signalprocessor import SignalProcessor, USEFUL_CCD_PIXELS
-from spectrometer import SpectrometerDriver, SpectrometerDriverMock
+from spectrometer import SpectrometerDriver
 
 try:
     from gpiozero import OutputDevice
@@ -540,6 +540,13 @@ class RamanGUI(QMainWindow):
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
+        self.checkbox_signal_inversion = self._add_toggle(
+            form,
+            "Display optical intensity:",
+            self.processor.enable_signal_inversion,
+            self.processor.set_enable_signal_inversion,
+        )
+
         self.checkbox_dark_subtraction = self._add_toggle(
             form,
             "Dark subtraction:",
@@ -963,6 +970,7 @@ class RamanGUI(QMainWindow):
             widget.setText(formatter(getattr(self.processor, attribute)))
 
         toggle_map = {
+            self.checkbox_signal_inversion: "enable_signal_inversion",
             self.checkbox_dark_subtraction: "enable_dark_subtraction",
             self.checkbox_spike_correction: "enable_spike_correction",
             self.checkbox_filtering: "enable_filtering",
@@ -994,9 +1002,7 @@ class RamanGUI(QMainWindow):
 
         try:
             self.dev = (
-                SpectrometerDriverMock()
-                if port == "__MOCK__"
-                else SpectrometerDriver(port=port, timeout=10.0)
+                SpectrometerDriver(port=port, timeout=10.0)
             )
             self.worker = AcquisitionThread(driver=self.dev, processor=self.processor)
             self.worker.data_ready.connect(self.update_plot)
@@ -1227,6 +1233,7 @@ class RamanGUI(QMainWindow):
                 "enable_filtering",
                 "enable_baseline_correction",
                 "enable_normalization",
+                "enable_signal_inversion",
             )
         }
 
@@ -1418,7 +1425,6 @@ class RamanGUI(QMainWindow):
 
         for port in list_ports.comports():
             self.port_input.addItem(f"{port.device} ({port.description})", port.device)
-        self.port_input.addItem("Mock (synthetic spectrum)", "__MOCK__")
 
         for index in range(self.port_input.count()):
             if self.port_input.itemData(index) == current:

@@ -1,8 +1,8 @@
 #ifndef TCD_VARIABLES_H
 #define TCD_VARIABLES_H
 
-#define CCD_PIXELS		3694
-#define OVERHEAD_8		6
+#define CCD_PIXELS										3694 //3694
+#define OVERHEAD_8										6
 
 // COMANDOS
 #define HEADER 											0x7346

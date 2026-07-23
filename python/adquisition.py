@@ -1,8 +1,7 @@
 from PySide6.QtCore import QThread, Signal
 import numpy as np
 
-from spectrometer import SpectrometerDriverMock
-from signalprocessor import FIRST_USEFUL_PIXEL, TRAILING_UNUSED_PIXELS
+from spectrometer import BEGINNING_UNUSED_PIXEL, TRAILING_UNUSED_PIXELS
 
 class AcquisitionThread(QThread):
     raw_data_ready = Signal(np.ndarray)
@@ -48,8 +47,9 @@ class AcquisitionThread(QThread):
                 if pixels is None:
                     self.msleep(10)
                     continue
-                    
-                pixels = np.asarray(pixels[FIRST_USEFUL_PIXEL:-TRAILING_UNUSED_PIXELS])
+
+                end = None if TRAILING_UNUSED_PIXELS == 0 else -TRAILING_UNUSED_PIXELS
+                pixels = np.asarray(pixels[BEGINNING_UNUSED_PIXEL:end])    
                 
                 # -------------------------------------------------------------
                 # DARK CAPTURE
@@ -83,9 +83,6 @@ class AcquisitionThread(QThread):
 
                 if processed_data is not None:
                     self.data_ready.emit(processed_data)
-
-                if isinstance(self.dev, SpectrometerDriverMock):
-                    self.msleep(100)
 
             except Exception as exc:
                 self.acquisition_error.emit(str(exc))

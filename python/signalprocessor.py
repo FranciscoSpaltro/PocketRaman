@@ -5,14 +5,12 @@ from scipy.ndimage import median_filter
 from pathlib import Path
 import json
 from scipy.signal import find_peaks as scipy_find_peaks
+from spectrometer import CCD_PIXELS, BEGINNING_UNUSED_PIXEL, TRAILING_UNUSED_PIXELS
 
-CCD_PIXELS = 3694
-FIRST_USEFUL_PIXEL = 33
-TRAILING_UNUSED_PIXELS = 14
-
-USEFUL_CCD_PIXELS = (CCD_PIXELS - FIRST_USEFUL_PIXEL - TRAILING_UNUSED_PIXELS)
+USEFUL_CCD_PIXELS = CCD_PIXELS - BEGINNING_UNUSED_PIXEL - TRAILING_UNUSED_PIXELS
 
 ADC_MAX = 4095
+ENABLE_SIGNAL_INVERSION_DEFAULT = True
 
 DARK_N_SAMPLES_MAX = 1000
 DARK_N_SAMPLES_MIN = 1
@@ -79,6 +77,8 @@ class SignalProcessor:
     # CONSTRUCTOR AND INITIALIZATION
     ################################################################################
     def __init__(self):
+        self.enable_signal_inversion = ENABLE_SIGNAL_INVERSION_DEFAULT
+
         # Individual spectrum
         self.dark_n_samples = DARK_N_SAMPLES_DEFAULT
         self.spike_window = SPIKE_WINDOW_DEFAULT
@@ -113,6 +113,10 @@ class SignalProcessor:
     ####################################################################################
     # SETTERS
     ####################################################################################
+    def set_enable_signal_inversion(self, value):
+        self.enable_signal_inversion = bool(value)
+        print(f"Display optical intensity = {self.enable_signal_inversion}")
+
     def set_dark_n_samples(self, value):
         val = int(value)
         val = min(max(val, DARK_N_SAMPLES_MIN), DARK_N_SAMPLES_MAX)
@@ -268,6 +272,7 @@ class SignalProcessor:
             "peak_prominence_factor": self.peak_prominence_factor,
             "peak_min_distance": self.peak_min_distance,
             "peak_min_width": self.peak_min_width,
+            "enable_signal_inversion": self.enable_signal_inversion,
         }
 
         path = Path(__file__).parent / filename
@@ -285,8 +290,10 @@ class SignalProcessor:
 
         if self.enable_dark_subtraction:
             processed = self.subtract_dark(raw)
-        else:
+        elif self.enable_signal_inversion:
             processed = ADC_MAX - raw
+        else:
+            processed = raw.copy()
 
         if self.enable_spike_correction:
             processed = self.correct_spikes(processed)
@@ -354,12 +361,18 @@ class SignalProcessor:
         return self.dark_average
     
     def subtract_dark(self, data):
-        y = np.asarray(data, dtype=float)
+        raw = np.asarray(data, dtype=float)
 
         if self.dark_average is None:
-            return ADC_MAX - y
+            if self.enable_signal_inversion:
+                return ADC_MAX - raw
 
-        corrected = self.dark_average - y
+            return raw.copy()
+
+        if self.enable_signal_inversion:
+            corrected = self.dark_average - raw
+        else:
+            corrected = raw - self.dark_average
 
         return np.clip(corrected, 0, None)
     
@@ -450,6 +463,7 @@ class SignalProcessor:
         self.spike_window = config.get("spike_window", self.spike_window)
         self.spike_T_multiplier = config.get("spike_T_multiplier", self.spike_T_multiplier)
         self.n_spectra = config.get("n_spectra", self.n_spectra)
+        self.enable_signal_inversion = config.get("enable_signal_inversion", self.enable_signal_inversion)
 
         self.filter_window = config.get("filter_window", self.filter_window)
         self.filter_poly_order = config.get("filter_poly_order", self.filter_poly_order)

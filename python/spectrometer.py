@@ -4,6 +4,10 @@ import numpy as np
 
 TIMEOUT_S = 100
 
+CCD_PIXELS              = 3694
+BEGINNING_UNUSED_PIXEL  = 0 #33
+TRAILING_UNUSED_PIXELS  = 0 #14
+
 class SpectrometerDriver:
     HEADER_VAL = 0x7346
     END_BUFFER_VAL = 0x7347
@@ -14,11 +18,10 @@ class SpectrometerDriver:
     CMD_SET_SKIP_COUNTER    = 0xF005
     CMD_TOGGLE_LED          = 0xF006
     CMD_ACK                 = 0xFF46
-    CCD_PIXELS = 3694
+
 
     def __init__(self, port="COM7", baud=921600, timeout=TIMEOUT_S):
         self.int_time_us = 100
-        self.n_accum = 50
         self.skip_count = 0
         self.ser = None
         
@@ -123,7 +126,7 @@ class SpectrometerDriver:
         # --- CASO B: DATOS DEL CCD (0xF003) ---
         elif cmd_val == self.CMD_DATA_SENDING:
             # Quedan por leer: Pixeles (CCD_PIXELS * 2 bytes) + Checksum (2 bytes) + Footer (2 bytes)
-            payload_size = self.CCD_PIXELS * 2
+            payload_size = CCD_PIXELS * 2
             rest_len = payload_size + 2 + 2 
             data = self.ser.read(rest_len)
             
@@ -139,7 +142,7 @@ class SpectrometerDriver:
                 print(f"Error: Fin de buffer CCD inválido (Se leyó: 0x{full_arr[-1]:04X}, esperado: 0x{self.END_BUFFER_VAL:04X})")
                 return None
 
-            pixels_clean = full_arr[:self.CCD_PIXELS]
+            pixels_clean = full_arr[:CCD_PIXELS]
             
             # Log para verificar el nivel de señal
             #print(f"Espectro capturado OK. Máximo valor del ADC: {np.max(pixels_clean)} cuentas.")
@@ -150,64 +153,3 @@ class SpectrometerDriver:
             # Si entra basura, se lee un byte para desalojar el bus y no trabar el sincronismo
             self.ser.read(self.ser.in_waiting or 1)
             return None
-
-##### Mock class for testing without hardware
-from synthetic_spectra import generate_synthetic_raman_raw
-class SpectrometerDriverMock:
-    def __init__(self, port="MOCK", baud=921600, timeout=2):
-        self.int_time_us = 100
-        self.n_accum = 50
-        self.skip_count = 0
-        self.ser = None
-        self._frame_index = 0
-        
-        try:
-            print(f"Mock connection to {port} @ {baud}")
-        except Exception as e:
-            print(f"Error connecting to port: {e}")
-            raise e
-
-    def cancel_read(self):
-        pass
-
-    def close(self):
-        print("Connection closed.")
-
-    def _send_command(self, cmd_id, payload_val=0xFFFFFFFF):
-        try:
-            print(f"Command sent")
-        except struct.error as e:
-            print(f"Error packaging data: {e}")
-
-    def reset_device(self):
-        print("Sending RESET...")
-
-
-    def set_integration_time(self, time_us):
-        print(f"Set Integration Time: {time_us} us")
-        self.int_time_us = time_us
-
-    def set_accumulations(self, n_accum):
-        print(f"Set Accumulations: {n_accum}")
-        self.n_accum = n_accum
-
-    def set_skip_counter(self, skip_count):
-        print(f"Set skip counter: {skip_count}")
-        self.skip_count = skip_count
-
-    def toggle_led(self):
-        print("Toggling LED...")
-
-
-    def read_frame(self):
-        _, pixels_raw, _, _ = generate_synthetic_raman_raw(
-            seed=42 + self._frame_index,
-            hot_pixel_prob=0.0,
-            dead_pixel_prob=0.0,
-            cosmic_ray_prob=0.0,
-            fixed_pattern_std=0.003,
-            read_noise_std=10,
-            shot_noise_scale=0.3,
-        )
-        self._frame_index += 1
-        return pixels_raw
