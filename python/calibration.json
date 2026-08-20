@@ -1,4 +1,8 @@
 {
-    "enabled": false,
-    "coefficients": null
+    "enabled": true,
+    "coefficients": [
+        -1.096790725443301e-05,
+        0.17715398856784012,
+        343.31724568327434
+    ]
 }

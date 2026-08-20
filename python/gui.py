@@ -44,23 +44,27 @@ except ImportError:
 
 
 # Reference wavelengths can be edited or moved to a JSON/CSV file later.
-# The intensity value is only used to choose which lines are shown first.
 NEON_REFERENCE_LINES = [
-	(585.24879, 0.2),
-	(588.18952, 0.1),
-	(602.99969, 0.1),
-	(607.43377, 0.1),
-	(614.30626, 0.1),
-	(621.72812, 0.1),
-	(626.6495, 0.1),
-	(633.44278, 0.1),
-	(638.29917, 0.1),
-	(640.2248, 0.2),
-	(650.65281, 0.15),
-	(659.89529, 0.1),
-	(692.94673, 1),
-	(703.24131, 0.8),
-	(748.88712, 0.3),
+    585.249,
+    588.190,
+    594.483,
+    603,
+    607.434,
+    609.616,
+    614.306,
+    621.728,
+    626.650,
+    630.479,
+    633.443,
+    638.299,
+    640.225,
+    650.653,
+    653.288,
+    659.895,
+    667.828,
+    671.704,
+    692.947,
+    703.241
 ]
 
 
@@ -99,7 +103,8 @@ class NeonCalibrationDialog(QDialog):
 
         instructions = QLabel(
             "Drag an orange neon line near the matching measured peak. "
-            "When released, it snaps to the local maximum and becomes green."
+            "When released, it snaps to the local maximum and becomes green. "
+            "Right-click a green line to remove its assignment."
         )
         instructions.setWordWrap(True)
         main_layout.addWidget(instructions)
@@ -172,29 +177,80 @@ class NeonCalibrationDialog(QDialog):
         main_layout.addLayout(button_row)
 
     def _create_reference_lines(self) -> None:
-        for wavelength, relative_intensity in NEON_REFERENCE_LINES:
+        label_positions = [0.92, 0.84, 0.76, 0.68]
+
+        for index, wavelength in enumerate(NEON_REFERENCE_LINES):
             pixel = self._initial_pixel_for_wavelength(wavelength)
+
             if not 0 <= pixel < self.spectrum.size:
                 continue
+
+            label_position = label_positions[index % len(label_positions)]
 
             line = pg.InfiniteLine(
                 pos=pixel,
                 angle=90,
                 movable=True,
-                pen=pg.mkPen((255, 140, 0), width=1.5, style=Qt.DashLine),
-                hoverPen=pg.mkPen((255, 100, 0), width=3),
+                pen=pg.mkPen(
+                    (255, 140, 0),
+                    width=1.5,
+                    style=Qt.DashLine,
+                ),
+                hoverPen=pg.mkPen(
+                    (255, 100, 0),
+                    width=3,
+                ),
                 label=f"{wavelength:.3f}",
-                labelOpts={"position": min(0.95, 0.68 + 0.25 * relative_intensity)},
+                labelOpts={
+                    "position": label_position,
+                },
             )
+
             line.neon_wavelength = wavelength
             line.initial_pixel = pixel
             line.assigned = False
+
             line.sigPositionChangeFinished.connect(
-                lambda moved_line=line: self._on_line_released(moved_line)
+                lambda moved_line=line:
+                    self._on_line_released(moved_line)
+            )
+
+            line.sigClicked.connect(
+                lambda clicked_line, event, selected_line=line:
+                    self._on_line_clicked(selected_line, event)
             )
 
             self.plot_widget.addItem(line)
             self.line_items.append(line)
+
+    def _on_line_clicked(
+        self,
+        line: pg.InfiniteLine,
+        event,
+    ) -> None:
+
+        if event.button() != Qt.MouseButton.RightButton:
+            return
+
+        if not line.assigned:
+            return
+
+        self.assigned_points.pop(
+            line.neon_wavelength,
+            None,
+        )
+
+        line.assigned = False
+
+        line.setPen(
+            pg.mkPen(
+                (255, 140, 0),
+                width=1.5,
+                style=Qt.DashLine,
+            )
+        )
+
+        self._refresh_table_and_fit()
 
     def _initial_pixel_for_wavelength(self, wavelength: float) -> float:
         if self.initial_coefficients is not None:
